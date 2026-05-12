@@ -353,6 +353,7 @@ if run_clicked:
     st.subheader("Per-ladder detail")
     detail_cols = ['n_iteration', 'first_rna_index', 'first_mass',
                    'first_mass_div_320', 'first_rna_pos', 'start_pos',
+                   'initial_delta_mean', 'position_shift_correction',
                    'pos_adjusted',
                    'n_placed', 'n_rejected_positions',
                    'delta_mean', 'delta_std', 'overall']

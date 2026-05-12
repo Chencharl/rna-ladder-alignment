@@ -10,11 +10,15 @@ Reject threshold is direction-dependent:
     3' end: delta <  -1 Da is rejected  (tighter because 3' fragments are shorter)
 
 Start-position placement:
-    The start position is assigned from the first non-High fragment mass using
+    The first RNA position is assigned from the first non-High fragment mass using
     standard positive half-up rounding:
         first_rna_pos = round_half_up(first_mass / 320)
     The ladder offset is then chosen so that this first RNA row lands exactly
     on first_rna_pos, even when High appears before it in the ordered rows.
+    After initial placement, ladders with strongly negative average delta mass
+    are shifted upward and all delta masses are recalculated:
+        avg_delta < -300 Da -> move up 2 positions
+        avg_delta <  -80 Da -> move up 1 position
 
 High calibrant handling:
     High rows are kept at their original ladder positions. Their delta masses
@@ -208,6 +212,15 @@ def _build_valid(ordered, high_indices, start_pos, max_pos):
     return valid
 
 
+def _position_shift_for_average_delta(avg_delta):
+    """Return upward position correction from the initial average delta mass."""
+    if avg_delta < -300:
+        return -2
+    if avg_delta < -80:
+        return -1
+    return 0
+
+
 def align_ladders(df, theo, cfg=None, direction='5'):
     """Align all ladder groups to the theoretical sequence.
 
@@ -246,6 +259,16 @@ def align_ladders(df, theo, cfg=None, direction='5'):
             i for i in ordered.index
             if ordered.loc[i, 'base_name'] == 'High'
         }
+
+        initial_valid = _build_valid(ordered, high_indices, start_pos, max_pos)
+        initial_delta_vals = [
+            row['monoisotopic_mass'] - theo_lookup[p]
+            for p, row in initial_valid
+            if p in theo_lookup
+        ]
+        initial_delta_mean = float(np.mean(initial_delta_vals)) if initial_delta_vals else 0.0
+        position_shift_correction = _position_shift_for_average_delta(initial_delta_mean)
+        start_pos += position_shift_correction
 
         valid = _build_valid(ordered, high_indices, start_pos, max_pos)
         delta_by_pos = {
@@ -314,7 +337,9 @@ def align_ladders(df, theo, cfg=None, direction='5'):
             'first_rna_pos':            first_rna_pos,
             'anchor_pos':               anchor_pos,
             'start_pos':                start_pos,
-            'pos_adjusted':             False,
+            'position_shift_correction': position_shift_correction,
+            'initial_delta_mean':       initial_delta_mean,
+            'pos_adjusted':             (position_shift_correction != 0),
             'end_pos':                  start_pos + len(ordered) - 1,
             'n_elements':               len(ordered),
             'n_placed':                 len(valid),
@@ -349,7 +374,7 @@ def _write_summary_sheet(wb, sheet_name, ladder_order, ladder_meta, sort_key):
     cols = [
         'ladder', 'n_iter', 'order_strategy',
         'first_rna_i', 'first_mass', 'first_mass/320', 'first_rna_pos',
-        'anchor', 'start', 'adjusted?', 'end',
+        'initial_delta_mean', 'pos_shift', 'anchor', 'start', 'adjusted?', 'end',
         'n_elem', 'n_placed', 'span', 'collisions',
         'align_diff', 'delta_mean', 'delta_std',
         'max_jump', 'n_rejected', 'reject_threshold',
@@ -369,6 +394,8 @@ def _write_summary_sheet(wb, sheet_name, ladder_order, ladder_meta, sort_key):
             round(m['first_mass'], 4),
             round(m['first_mass_div_320'], 4),
             m['rounded_first_mass_div_320'],
+            round(m['initial_delta_mean'], 4),
+            m['position_shift_correction'],
             m['anchor_pos'],
             m['start_pos'],
             'yes' if m['pos_adjusted'] else '',
@@ -394,9 +421,9 @@ def _write_summary_sheet(wb, sheet_name, ladder_order, ladder_meta, sort_key):
         ws.cell(r, len(cols)).fill = _fill(bg)
         ws.cell(r, len(cols)).font = Font(name='Arial', size=8, bold=True, color=fg)
         if m['placement_collision_count'] > 0:
-            ws.cell(r, 15).fill = _fill('FFC7CE')
+            ws.cell(r, 17).fill = _fill('FFC7CE')
         if m['pos_adjusted']:
-            ws.cell(r, 10).fill = _fill('FFEB9C')
+            ws.cell(r, 12).fill = _fill('FFEB9C')
 
     for ci in range(1, len(cols) + 1):
         ws.column_dimensions[get_column_letter(ci)].width = 14
@@ -461,6 +488,8 @@ def build_excel(ladder_order, ladder_meta, ladder_maps,
             f"m1/320={meta['first_mass_div_320']:.2f} "
             f"-> RNA pos {meta['first_rna_pos']} (start {meta['start_pos']})"
         )
+        if meta['position_shift_correction']:
+            label += f"  [shift {meta['position_shift_correction']}]"
         if tag:
             label += f"  [{tag}]"
         if meta['pos_adjusted']:

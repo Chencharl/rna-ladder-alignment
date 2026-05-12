@@ -10,6 +10,9 @@ NOISY SHIFTED, REJECTED, or normal. Outputs colour-coded Excel workbooks.
 
 The easiest way to use this tool is through the Streamlit web app.
 
+**Live app:**
+[rna-ladder-alignment-g2jbxez5lk5gzhuowa2euz.streamlit.app](https://rna-ladder-alignment-g2jbxez5lk5gzhuowa2euz.streamlit.app)
+
 **Deploy your own instance (free):**
 1. Fork this repository on GitHub.
 2. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
@@ -79,6 +82,16 @@ first_rna_pos = round_half_up(first_mass / 320)
 The ladder offset is then chosen so that this first RNA row lands exactly on
 `first_rna_pos`, even if `High` appears before it in the ordered rows. The
 pipeline no longer tests `anchor±1`.
+
+After this initial placement, the average delta-mass is calculated across all
+placed rows with theoretical positions, including `High`. Strongly negative
+averages trigger an automatic upward correction and then all delta-masses are
+recalculated:
+
+| Initial average Δmass | Correction |
+|---|---|
+| `< -300 Da` | Move the whole ladder up 2 positions |
+| `< -80 Da` | Move the whole ladder up 1 position |
 
 ### High calibrant handling
 
