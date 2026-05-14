@@ -1,0 +1,9 @@
+# FastAPI backend dependencies
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+
+# Scientific stack (same versions as root requirements.txt)
+pandas>=2.0
+numpy>=1.24
+openpyxl>=3.1

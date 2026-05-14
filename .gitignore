@@ -13,3 +13,13 @@ results/
 *.xlsx
 !theo_5.csv
 !theo_3.csv
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+frontend/out/
+
+# Backend
+backend/__pycache__/
+backend/*.pyc

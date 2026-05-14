@@ -1,0 +1,15 @@
+# Railway deployment config — backend only
+# In the Railway dashboard: leave Root Directory as the repo root.
+# Railway will clone the full repo, giving backend/app.py access to
+# ladder_alignment_pipeline.py via sys.path (see backend/app.py top).
+
+[build]
+builder = "nixpacks"
+buildCommand = "pip install -r backend/requirements.txt"
+
+[deploy]
+startCommand = "cd backend && uvicorn app:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
