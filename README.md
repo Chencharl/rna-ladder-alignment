@@ -26,6 +26,37 @@ streamlit run app.py
 ```
 Then open http://localhost:8501, upload your three files, and click Run.
 
+## Next.js frontend + FastAPI backend deployment
+
+This repository also contains a split frontend/backend deployment:
+
+- `frontend/`: Next.js app for Vercel
+- `backend/`: FastAPI wrapper around `ladder_alignment_pipeline.py`
+- `railway.toml`: Railway config for the backend service
+
+The Vercel frontend does not run the Python alignment code by itself. It sends
+uploads to the FastAPI backend at `POST /align`, so production needs both
+services:
+
+1. Deploy the backend service from the repo root using `railway.toml`.
+2. Confirm the backend health endpoint returns `{"status":"ok"}`:
+
+   ```bash
+   curl https://YOUR-BACKEND.up.railway.app/health
+   ```
+
+3. In the Vercel project for `frontend/`, add an environment variable for
+   Production, Preview, and Development:
+
+   ```text
+   NEXT_PUBLIC_API_URL=https://YOUR-BACKEND.up.railway.app
+   ```
+
+4. Redeploy the Vercel frontend after setting the environment variable.
+
+If `NEXT_PUBLIC_API_URL` is missing, the frontend cannot reach `/align` and the
+browser will report a load/fetch failure instead of producing Excel files.
+
 ## Command-line usage
 
 ```bash

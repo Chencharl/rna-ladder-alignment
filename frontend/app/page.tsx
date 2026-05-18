@@ -724,7 +724,12 @@ export default function Home() {
     }
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+      if (!apiUrl) {
+        throw new Error(
+          "Backend API URL is not configured. Set NEXT_PUBLIC_API_URL in Vercel to your deployed FastAPI backend URL, then redeploy the frontend."
+        );
+      }
       const resp   = await fetch(`${apiUrl}/align`, { method: "POST", body: form });
 
       if (!resp.ok) {
