@@ -13,6 +13,9 @@ The easiest way to use this tool is through the Streamlit web app.
 **Live app:**
 [rna-ladder-alignment-g2jbxez5lk5gzhuowa2euz.streamlit.app](https://rna-ladder-alignment-g2jbxez5lk5gzhuowa2euz.streamlit.app)
 
+**Vercel frontend:**
+[rna-ladder-frontend.vercel.app](https://rna-ladder-frontend.vercel.app)
+
 **Deploy your own instance (free):**
 1. Fork this repository on GitHub.
 2. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
@@ -32,24 +35,32 @@ This repository also contains a split frontend/backend deployment:
 
 - `frontend/`: Next.js app for Vercel
 - `backend/`: FastAPI wrapper around `ladder_alignment_pipeline.py`
+- `api/index.py`: Vercel Python entrypoint for the FastAPI backend
 - `railway.toml`: Railway config for the backend service
 
 The Vercel frontend does not run the Python alignment code by itself. It sends
 uploads to the FastAPI backend at `POST /align`, so production needs both
 services:
 
-1. Deploy the backend service from the repo root using `railway.toml`.
+1. Deploy the backend service from the repo root. This project currently uses
+   Vercel Python Functions at:
+
+   ```text
+   https://rna-ladder-backend.vercel.app
+   ```
+
+   Railway can also be used via `railway.toml`.
 2. Confirm the backend health endpoint returns `{"status":"ok"}`:
 
    ```bash
-   curl https://YOUR-BACKEND.up.railway.app/health
+   curl https://rna-ladder-backend.vercel.app/health
    ```
 
 3. In the Vercel project for `frontend/`, add an environment variable for
    Production, Preview, and Development:
 
    ```text
-   NEXT_PUBLIC_API_URL=https://YOUR-BACKEND.up.railway.app
+   NEXT_PUBLIC_API_URL=https://rna-ladder-backend.vercel.app
    ```
 
 4. Redeploy the Vercel frontend after setting the environment variable.

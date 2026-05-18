@@ -209,17 +209,17 @@ def _per_ladder_records(order: list, meta: dict) -> list[dict]:
     return [
         {
             "ladder":                    ladder,
-            "n_iteration":               meta[ladder]["n_iteration"],
-            "first_rna_pos":             meta[ladder]["first_rna_pos"],
-            "start_pos":                 meta[ladder]["start_pos"],
-            "position_shift_correction": meta[ladder]["position_shift_correction"],
-            "pos_adjusted":              meta[ladder]["pos_adjusted"],
-            "n_placed":                  meta[ladder]["n_placed"],
-            "n_rejected_positions":      meta[ladder]["n_rejected_positions"],
-            "delta_mean":      round(float(meta[ladder]["delta_mean"]),          4),
-            "delta_std":       round(float(meta[ladder]["delta_std"]),           4),
-            "max_abs_delta_jump": round(float(meta[ladder]["max_abs_delta_jump"]), 4),
-            "overall":                   meta[ladder]["overall"],
+            "n_iteration":               int(meta[ladder]["n_iteration"]),
+            "first_rna_pos":             int(meta[ladder]["first_rna_pos"]),
+            "start_pos":                 int(meta[ladder]["start_pos"]),
+            "position_shift_correction": int(meta[ladder]["position_shift_correction"]),
+            "pos_adjusted":              bool(meta[ladder]["pos_adjusted"]),
+            "n_placed":                  int(meta[ladder]["n_placed"]),
+            "n_rejected_positions":      int(meta[ladder]["n_rejected_positions"]),
+            "delta_mean":                round(float(meta[ladder]["delta_mean"]), 4),
+            "delta_std":                 round(float(meta[ladder]["delta_std"]), 4),
+            "max_abs_delta_jump":        round(float(meta[ladder]["max_abs_delta_jump"]), 4),
+            "overall":                   str(meta[ladder]["overall"]),
         }
         for ladder in order
     ]
