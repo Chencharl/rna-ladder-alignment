@@ -1,0 +1,461 @@
+{
+  "n_points": 68,
+  "n_chains": 7,
+  "plot": "/tmp/real_demo_run/relative_intensity.png",
+  "chains_overlay_plot": "/tmp/real_demo_run/chains_overlay.png",
+  "gap_mode": "jiang_strict",
+  "max_residues_per_step_used": 3,
+  "max_missing_positions_used": 2,
+  "chains": [
+    {
+      "ladder_type": "conflict",
+      "ladder_confidence": 0.32,
+      "ladder_evidence": [
+        "seed decimal: chain 0=0.249 vs chain 6=0.755 (diff=+0.506)",
+        "seed RT: chain 0=1.997 vs chain 6=10.716 (diff=+8.719)",
+        "decimal/RT sign consistency: CONTRADICTORY",
+        "intensity-rank gap between the two reads: 6",
+        "mass-range overlap fraction: 0.00",
+        "same starting block: False",
+        "precursor mass closure: not evaluated (no precursor_mass configured)"
+      ],
+      "ladder_warnings": [
+        "decimal-part and RT evidence disagree on which read is 5' vs 3' for this candidate pair",
+        "mass ranges barely overlap; pair may not originate from the same molecule",
+        "paired with chain 6, but decimal/RT evidence conflicts -- needs manual review"
+      ],
+      "paired_with": 6,
+      "pair_score": 0.48,
+      "n_points": 16,
+      "n_reused": 0,
+      "reuse_evidence": [],
+      "mass_range": [
+        976.2489,
+        5895.9849
+      ],
+      "sequence_calls": [
+        "A",
+        "C",
+        "A",
+        "A",
+        "A",
+        "G",
+        "G",
+        "C",
+        "G",
+        "G",
+        "G",
+        "C",
+        "C",
+        "A",
+        "A"
+      ]
+    },
+    {
+      "ladder_type": "likely_3prime",
+      "ladder_confidence": 0.799,
+      "ladder_evidence": [
+        "seed decimal: chain 1=0.755 vs chain 2=0.319 (diff=-0.437)",
+        "seed RT: chain 1=4.613 vs chain 2=7.997 (diff=+3.384)",
+        "decimal/RT sign consistency: consistent with Jiang rule",
+        "intensity-rank gap between the two reads: 1",
+        "mass-range overlap fraction: 0.00",
+        "same starting block: False",
+        "precursor mass closure: not evaluated (no precursor_mass configured)",
+        "paired with chain 2 (pair score=0.60, read lengths 10/16)"
+      ],
+      "ladder_warnings": [
+        "mass ranges barely overlap; pair may not originate from the same molecule"
+      ],
+      "paired_with": 2,
+      "pair_score": 0.598,
+      "n_points": 10,
+      "n_reused": 0,
+      "reuse_evidence": [],
+      "mass_range": [
+        10511.2767,
+        15971.9931
+      ],
+      "sequence_calls": [
+        "A/G/U",
+        "C/G/U",
+        "C/G/G",
+        "C/U/U",
+        "A",
+        "m1A",
+        "A",
+        "C",
+        "U"
+      ]
+    },
+    {
+      "ladder_type": "likely_5prime",
+      "ladder_confidence": 0.799,
+      "ladder_evidence": [
+        "seed decimal: chain 1=0.755 vs chain 2=0.319 (diff=-0.437)",
+        "seed RT: chain 1=4.613 vs chain 2=7.997 (diff=+3.384)",
+        "decimal/RT sign consistency: consistent with Jiang rule",
+        "intensity-rank gap between the two reads: 1",
+        "mass-range overlap fraction: 0.00",
+        "same starting block: False",
+        "precursor mass closure: not evaluated (no precursor_mass configured)",
+        "paired with chain 1 (pair score=0.60, read lengths 16/10)"
+      ],
+      "ladder_warnings": [
+        "mass ranges barely overlap; pair may not originate from the same molecule"
+      ],
+      "paired_with": 1,
+      "pair_score": 0.598,
+      "n_points": 16,
+      "n_reused": 0,
+      "reuse_evidence": [],
+      "mass_range": [
+        19816.3185,
+        24585.9625
+      ],
+      "sequence_calls": [
+        "U",
+        "C",
+        "U",
+        "A",
+        "C",
+        "G",
+        "A",
+        "U",
+        "C",
+        "C",
+        "U",
+        "A",
+        "m1A",
+        "G",
+        "C"
+      ]
+    },
+    {
+      "ladder_type": "likely_5prime",
+      "ladder_confidence": 0.763,
+      "ladder_evidence": [
+        "seed decimal: chain 3=0.154 vs chain 4=0.727 (diff=+0.573)",
+        "seed RT: chain 3=11.002 vs chain 4=4.644 (diff=-6.358)",
+        "decimal/RT sign consistency: consistent with Jiang rule",
+        "intensity-rank gap between the two reads: 1",
+        "mass-range overlap fraction: 0.00",
+        "same starting block: False",
+        "precursor mass closure: not evaluated (no precursor_mass configured)",
+        "paired with chain 4 (pair score=0.64, read lengths 13/5)"
+      ],
+      "ladder_warnings": [
+        "mass ranges barely overlap; pair may not originate from the same molecule"
+      ],
+      "paired_with": 4,
+      "pair_score": 0.636,
+      "n_points": 13,
+      "n_reused": 0,
+      "reuse_evidence": [],
+      "mass_range": [
+        28625.1543,
+        32550.6643
+      ],
+      "sequence_calls": [
+        "m7G",
+        "U",
+        "U",
+        "m1A",
+        "G",
+        "U",
+        "A",
+        "U",
+        "A",
+        "G",
+        "U",
+        "G"
+      ]
+    },
+    {
+      "ladder_type": "likely_3prime",
+      "ladder_confidence": 0.763,
+      "ladder_evidence": [
+        "seed decimal: chain 3=0.154 vs chain 4=0.727 (diff=+0.573)",
+        "seed RT: chain 3=11.002 vs chain 4=4.644 (diff=-6.358)",
+        "decimal/RT sign consistency: consistent with Jiang rule",
+        "intensity-rank gap between the two reads: 1",
+        "mass-range overlap fraction: 0.00",
+        "same starting block: False",
+        "precursor mass closure: not evaluated (no precursor_mass configured)",
+        "paired with chain 3 (pair score=0.64, read lengths 5/13)"
+      ],
+      "ladder_warnings": [
+        "mass ranges barely overlap; pair may not originate from the same molecule"
+      ],
+      "paired_with": 3,
+      "pair_score": 0.636,
+      "n_points": 5,
+      "n_reused": 0,
+      "reuse_evidence": [],
+      "mass_range": [
+        10206.2352,
+        14053.7268
+      ],
+      "sequence_calls": [
+        "G/U/C",
+        "A/C/G",
+        "G/G/U",
+        "C/C/U"
+      ]
+    },
+    {
+      "ladder_type": "ambiguous",
+      "ladder_confidence": 0.0,
+      "ladder_evidence": [
+        "no candidate partner read met min_pair_score -- this chain has no 5'/3' partner evidence either way, so it cannot be called 5' or 3'",
+        "supplementary, non-determining note: seed decimal 0.687 vs across-chain median 0.687 (this is NOT used to decide the label)"
+      ],
+      "ladder_warnings": [
+        "no paired read found -- recommend manual review or a reference sequence to disambiguate"
+      ],
+      "paired_with": null,
+      "pair_score": null,
+      "n_points": 4,
+      "n_reused": 0,
+      "reuse_evidence": [],
+      "mass_range": [
+        10856.3242,
+        13748.6873
+      ],
+      "sequence_calls": [
+        "A/C/U",
+        "G/G/U",
+        "C/G/U"
+      ]
+    },
+    {
+      "ladder_type": "conflict",
+      "ladder_confidence": 0.32,
+      "ladder_evidence": [
+        "seed decimal: chain 0=0.249 vs chain 6=0.755 (diff=+0.506)",
+        "seed RT: chain 0=1.997 vs chain 6=10.716 (diff=+8.719)",
+        "decimal/RT sign consistency: CONTRADICTORY",
+        "intensity-rank gap between the two reads: 6",
+        "mass-range overlap fraction: 0.00",
+        "same starting block: False",
+        "precursor mass closure: not evaluated (no precursor_mass configured)"
+      ],
+      "ladder_warnings": [
+        "decimal-part and RT evidence disagree on which read is 5' vs 3' for this candidate pair",
+        "mass ranges barely overlap; pair may not originate from the same molecule",
+        "paired with chain 0, but decimal/RT evidence conflicts -- needs manual review"
+      ],
+      "paired_with": 0,
+      "pair_score": 0.48,
+      "n_points": 3,
+      "n_reused": 0,
+      "reuse_evidence": [],
+      "mass_range": [
+        32895.7125,
+        33877.8589
+      ],
+      "sequence_calls": [
+        "D",
+        "A/G"
+      ]
+    }
+  ],
+  "contig_groups": [
+    [
+      0
+    ],
+    [
+      1
+    ],
+    [
+      2
+    ],
+    [
+      3
+    ],
+    [
+      4
+    ],
+    [
+      5
+    ],
+    [
+      6
+    ]
+  ],
+  "read_summary_csv": "/tmp/real_demo_run/read_summary.csv",
+  "Top_Parallel_Reads_csv": "/tmp/real_demo_run/Top_Parallel_Reads.csv",
+  "Top_Parallel_Reads_xlsx": "/tmp/real_demo_run/Top_Parallel_Reads.xlsx",
+  "top_parallel_reads_long_csv": "/tmp/real_demo_run/top_parallel_reads_long.csv",
+  "sequencing_decision_summary_csv": "/tmp/real_demo_run/sequencing_decision_summary.csv",
+  "classification_evidence_csv": "/tmp/real_demo_run/Classification_Evidence.csv",
+  "peak_status_csv": "/tmp/real_demo_run/Peak_Status.csv",
+  "Read_Summary_Review_xlsx": "/tmp/real_demo_run/Read_Summary_Review.xlsx",
+  "Peak_Status_xlsx": "/tmp/real_demo_run/Peak_Status.xlsx",
+  "Classification_Evidence_xlsx": "/tmp/real_demo_run/Classification_Evidence.xlsx",
+  "review_summary": {
+    "reads_5prime": 2,
+    "reads_3prime": 2,
+    "reads_ambiguous": 1,
+    "reads_conflict": 2,
+    "primary_used_peaks": 44,
+    "reference_provided": false,
+    "reference_reuse_candidates_tested": 0,
+    "reference_reuse_accepted": 0,
+    "reference_reuse_rejected": 0
+  },
+  "file_name": "in-memory dataframe (no input file path provided)",
+  "runtime_seconds": 0.265,
+  "n_blocks": 56,
+  "peak_status_counts": {
+    "primary_used": 44,
+    "ambiguous_retained": 4,
+    "conflict_retained": 19,
+    "reference_reused": 0,
+    "unused": 1
+  },
+  "read_call_counts": {
+    "5prime": 2,
+    "3prime": 2,
+    "ambiguous": 1,
+    "conflict": 2
+  },
+  "top_parallel_warning": false,
+  "annotated_csv": "/tmp/real_demo_run/annotated_data.csv",
+  "method_compliance": {
+    "method": "Dr. Jiang's Nested Algorithm for tRNA mixtures using block-wise relative intensity",
+    "audit_doc": "Jiang_Method_Audit.md",
+    "steps": {
+      "step_1_input_columns": {
+        "description": "Read M/I/T input columns",
+        "implemented": "yes",
+        "proof": [
+          "load_data()",
+          "annotated_data.csv columns: M, I, T"
+        ],
+        "limitations": "Column identification is keyword-based (_resolve_column); an export with unrecognized headers fails to load rather than guessing."
+      },
+      "step_2_mass_ascending_sort": {
+        "description": "Mass-ascending sort",
+        "implemented": "yes",
+        "proof": [
+          "load_data(): df.sort_values('M', ascending=True)",
+          "annotated_data.csv row order"
+        ],
+        "limitations": "None -- unconditional sort, no tunable parameter."
+      },
+      "step_3_block_definition": {
+        "description": "Block definition, k range, block width",
+        "implemented": "yes",
+        "proof": [
+          "BLOCK_WIDTH_DA=320.0, N_BLOCKS=95 (k=1..95)",
+          "assign_blocks()",
+          "annotated_data.csv['block']",
+          "report['n_blocks']"
+        ],
+        "limitations": "320.0 Da is a fixed approximation of average single-nucleotide residue mass, not derived per-run. N_BLOCKS=95 is a fixed ceiling, not computed from the input's mass span."
+      },
+      "step_4_linear_rel_i": {
+        "description": "Linear Rel.I = I / block max I",
+        "implemented": "yes",
+        "proof": [
+          "compute_relative_intensity()",
+          "annotated_data.csv['Rel_I']"
+        ],
+        "limitations": "None for the computation itself; see method_notes.linear_rel_i_for_selection for how it's used."
+      },
+      "step_5_visualization": {
+        "description": "Rel.I vs M visualization",
+        "implemented": "yes",
+        "proof": [
+          "plot_relative_intensity()",
+          "relative_intensity.png",
+          "report['plot']"
+        ],
+        "limitations": "Static PNG only; the dashboard's chart is a separate re-rendering of the same Rel_I/M/block columns."
+      },
+      "step_6_1_seed_order": {
+        "description": "Seed order by highest unflagged Rel.I",
+        "implemented": "yes",
+        "proof": [
+          "run_base_calling() Phase 1: intensity_order = df.sort_values('Rel_I', ascending=False)",
+          "chains[i].read_rank ordering"
+        ],
+        "limitations": "None -- unconditional global sort, no tunable parameter."
+      },
+      "step_6_2_mass_filter_rt_trend": {
+        "description": "Mass hard filter -> highest Rel.I -> RT trend check",
+        "implemented": "yes",
+        "proof": [
+          "_find_candidates()",
+          "_select_next()",
+          "Config.mass_tol/rt_zscore/rt_window",
+          "report['gap_mode']/['max_residues_per_step_used']"
+        ],
+        "limitations": "mass_tol and rt_zscore are tunable thresholds standing in for 'mass hard filter' and 'RT trend check', not literal values from the source document. rt_std_floor prevents a degenerate near-zero RT std from blowing up the z-score."
+      },
+      "step_6_3_stop_condition": {
+        "description": "Stop when no candidate satisfies criteria",
+        "implemented": "yes",
+        "proof": [
+          "_select_next() returns None -> _extend_direction() breaks",
+          "chains[i].n_points variability"
+        ],
+        "limitations": "Config.min_chain_len additionally drops length-1 chains from the report (still marked used per 6.5); a reporting threshold, not part of the stopping rule itself."
+      },
+      "step_6_4_paired_read_classification": {
+        "description": "Paired-read 5'/3' classification using decimal part and RT evidence, with confidence/warnings",
+        "implemented": "yes",
+        "proof": [
+          "classify_ladders()",
+          "find_best_pairs()",
+          "chains[i].ladder_type/ladder_confidence/ladder_evidence/ladder_warnings",
+          "read_summary.csv & Classification_Evidence.csv evidence columns"
+        ],
+        "limitations": "Config.min_pair_score (acceptable-partner cutoff) and the length_factor-weighted confidence formula are implementation heuristics, not literal values from the source method. The across-chain seed-decimal median is never the determining rule (see method_notes)."
+      },
+      "step_6_5_flag_and_exclude": {
+        "description": "Flag used peaks and avoid them in the next primary read",
+        "implemented": "yes",
+        "proof": [
+          "_extend_direction() sets used[idx]=True",
+          "_find_candidates() excludes used points",
+          "annotated_data.csv/Peak_Status.csv['peak_status']",
+          "chains_overlay.png"
+        ],
+        "limitations": "None for primary reads -- flagging is unconditional and global. The one intentional exception is Step 6.6 reuse (see method_notes)."
+      },
+      "step_6_6_reference_guided_reuse": {
+        "description": "Reference-dependent second-stage comparison/reuse, only if reference is supplied",
+        "implemented": "reference-dependent (not supplied this run)",
+        "proof": [
+          "apply_reference_guided_extension()",
+          "review_summary.reference_provided",
+          "reference_comparisons (present only if reference supplied)",
+          "Reference_Reuse_Audit.xlsx (present only if reference supplied)"
+        ],
+        "limitations": "Only exercised on runs that pass a reference; this is by design (deliberate no-op), not a missing feature."
+      },
+      "step_6_7_top_parallel_reads": {
+        "description": "Generate many short reads in Rel.I order and report their relationships/top parallel reads",
+        "implemented": "yes",
+        "proof": [
+          "build_top_parallel_reads_grid()",
+          "build_top_parallel_reads_long()",
+          "assemble_contigs()",
+          "Top_Parallel_Reads.csv/.xlsx",
+          "top_parallel_reads_long.csv",
+          "report['contig_groups']"
+        ],
+        "limitations": "assemble_contigs(min_overlap=2)'s overlap threshold is a tunable heuristic, not a literal value from the source document."
+      }
+    },
+    "method_notes": {
+      "linear_rel_i_for_selection": "Every selection decision in Step 6 (seeding, candidate ranking, pair scoring) reads Rel_I exclusively; Config.intensity_scale only controls which column the plots draw.",
+      "log_intensity_qc_display_only": "log10_intensity_qc is computed alongside Rel_I for visual inspection only; no base-calling function reads this column.",
+      "step_6_4_evidence_based_not_ground_truth": "5'/3' classification is evidence-based (agreeing partner -> 5'/3', disagreeing -> conflict, no partner -> ambiguous, explicitly not a guess), not an absolute ground truth.",
+      "step_6_6_reference_dependent": "Reference-guided reuse only runs when cfg.reference is supplied; every chain still gets an empty reuse_evidence list otherwise for schema uniformity.",
+      "no_peak_reuse_in_primary_reads": "Primary reads (Phase 1) never reuse a flagged point; reference-guided reuse (Phase 2) runs strictly afterward and only extends existing read ends, enforced by run_base_calling()'s three-phase structure."
+    }
+  }
+}
