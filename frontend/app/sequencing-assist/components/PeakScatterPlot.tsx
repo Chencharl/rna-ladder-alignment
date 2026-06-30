@@ -161,7 +161,7 @@ export function PeakScatterPlot({ rawScatter, topChains, topParallel, peakStatus
     }
 
     return result;
-  }, [topParallel, peakStatus, selectedReadRank]);
+  }, [rawScatter, topChains, topParallel, peakStatus, selectedReadRank]);
 
   const annotations = useMemo(() => {
     const result: any[] = [];

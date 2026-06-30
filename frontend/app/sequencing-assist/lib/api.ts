@@ -13,6 +13,11 @@ export interface SigmoidPoint {
   Rel_I: number;
 }
 
+export interface DataTypeWarning {
+  likely_intact: boolean;
+  reasons: string[];
+}
+
 export interface UploadRawResponse {
   session_id: string;
   filename: string;
@@ -23,6 +28,7 @@ export interface UploadRawResponse {
   preview_rows: Array<{ M: number; I: number; T: number; block: number; Rel_I: number }>;
   scatter_points: ScatterPoint[];
   sigmoid_points: SigmoidPoint[];
+  data_type_warning: DataTypeWarning;
 }
 
 export interface ChainPoint {

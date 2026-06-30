@@ -31,42 +31,47 @@ Then open http://localhost:8501, upload your three files, and click Run.
 
 ## Next.js frontend + FastAPI backend deployment
 
-This repository also contains a split frontend/backend deployment:
+This repository contains a split frontend/backend deployment:
 
-- `frontend/`: Next.js app for Vercel
-- `backend/`: FastAPI wrapper around `ladder_alignment_pipeline.py`
-- `api/index.py`: Vercel Python entrypoint for the FastAPI backend
-- `railway.toml`: Railway config for the backend service
+- `frontend/`: Next.js app, deployed on Vercel
+- `backend/`: FastAPI app (wraps `ladder_alignment_pipeline.py` and
+  `trna_nested_algorithm.py`), deployed on **Railway** via `railway.toml`
+- `railway.toml`: Railway build/start config for the backend service
 
-The Vercel frontend does not run the Python alignment code by itself. It sends
-uploads to the FastAPI backend at `POST /align`, so production needs both
-services:
+The backend is a persistent server, not a Vercel serverless function — it
+needs a writable, long-lived filesystem for the upload → run-pipeline session
+flow (`backend/app.py` writes a parsed parquet file per session, then reads it
+back on `/sequencing-assist/run-pipeline`). Vercel Python Functions are
+short-lived and don't guarantee the same container across two separate
+requests, so the backend must not be deployed there.
 
-1. Deploy the backend service from the repo root. This project currently uses
-   Vercel Python Functions at:
+The Vercel frontend does not run any Python code itself. It calls the FastAPI
+backend over HTTP, so production needs both services running:
 
-   ```text
-   https://rna-ladder-backend.vercel.app
-   ```
+1. **Deploy the backend on [Railway](https://railway.app):**
+   - New Project → Deploy from GitHub repo → select this repo.
+   - Leave Root Directory as the repo root (`railway.toml` already points the
+     build/start commands at `backend/`).
+   - Railway assigns a public URL like `https://<service>.up.railway.app`.
 
-   Railway can also be used via `railway.toml`.
 2. Confirm the backend health endpoint returns `{"status":"ok"}`:
 
    ```bash
-   curl https://rna-ladder-backend.vercel.app/health
+   curl https://<service>.up.railway.app/health
    ```
 
-3. In the Vercel project for `frontend/`, add an environment variable for
+3. In the Vercel project for `frontend/`, set the environment variable for
    Production, Preview, and Development:
 
    ```text
-   NEXT_PUBLIC_API_URL=https://rna-ladder-backend.vercel.app
+   NEXT_PUBLIC_API_URL=https://<service>.up.railway.app
    ```
 
 4. Redeploy the Vercel frontend after setting the environment variable.
 
-If `NEXT_PUBLIC_API_URL` is missing, the frontend cannot reach `/align` and the
-browser will report a load/fetch failure instead of producing Excel files.
+If `NEXT_PUBLIC_API_URL` is missing or wrong, the frontend cannot reach the
+backend and the browser will report a load/fetch failure instead of producing
+results.
 
 ## Command-line usage
 
@@ -193,6 +198,24 @@ cfg = AlignConfig(
     noisy_jump_da          =  50.0,
 )
 ```
+
+## Optional tRNA-suite QC
+
+The FastAPI `/align` endpoint also accepts optional tRNA-suite-inspired inputs
+without changing the default ladder alignment path:
+
+| Parameter | Default | Purpose |
+|---|---:|---|
+| `sample_type` | `natural_RNA` | Use `natural_RNA` 5′ offset `97.9769` or `synthetic_RNA` 5′ offset `18.015` when computing sequence-derived theoretical masses |
+| `mod_mass_file` | — | Optional CSV/XLSX dictionary with `Symbol`, `Nucleotide`, `Base`, and optional `Mass` columns |
+| `raw_peak_file` | — | Optional raw peak CSV/XLSX for ppm matching, unmatched peak reporting, coverage, and peak reuse counts |
+| `raw_peak_ppm` | `10` | ppm window for raw peak matching |
+| `raw_peak_mass_min` / `raw_peak_mass_max` | `800` / `30000` | mass range retained in the unmatched peak list |
+| `run_base_call` | `false` | Enables experimental unmatched-peak base-call candidate search |
+
+Unknown residue tokens are strict errors unless supplied through
+`mod_mass_file` or precomputed theoretical CSVs. The backend does not guess
+unknown modified bases from token spelling.
 
 ## Requirements
 

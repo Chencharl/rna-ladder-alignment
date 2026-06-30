@@ -47,6 +47,8 @@ from trna_nested_algorithm import (  # noqa: E402
     compute_relative_intensity,
     run_pipeline as run_nested_pipeline,
     Config as NestedConfig,
+    BLOCK_WIDTH_DA,
+    N_BLOCKS,
 )
 from backend.trna_constraints import (  # noqa: E402
     ResidueDictionary,
@@ -538,6 +540,54 @@ def _session_path(session_id: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Data-type heuristic: hydrolysis ladder vs. intact mass file
+#
+# Dr. Jiang's nested base-calling algorithm assumes a hydrolysis ladder —
+# many fragments spanning a wide mass range, one block per ~residue. Intact
+# mass files (one or a few full-length species, often charge-state/adduct
+# variants of 1-2 molecules) don't have that structure, and feeding them
+# through the same chain-calling pipeline produces noisy, low-confidence
+# "reads" that aren't meaningful. This is a conservative, explainable
+# heuristic — it warns, it never blocks the user from proceeding anyway.
+# ---------------------------------------------------------------------------
+
+def _detect_data_type(df: pd.DataFrame, block_width: float = BLOCK_WIDTH_DA, n_blocks: int = N_BLOCKS) -> dict:
+    n = len(df)
+    reasons: list[str] = []
+
+    # Species heavier than the ladder's designed block range get clipped
+    # into the last block, corrupting that block's Rel_I scaling.
+    raw_k = (df["M"] / block_width).round()
+    n_over_range = int((raw_k > n_blocks).sum())
+    frac_over_range = (n_over_range / n) if n else 0.0
+    if frac_over_range > 0.01:
+        reasons.append(
+            f"{n_over_range} point(s) ({frac_over_range * 100:.1f}%) have mass above the "
+            f"~{n_blocks * block_width:.0f} Da ladder range and get clipped into the last block."
+        )
+
+    # Hydrolysis runs are typically 1,000+ fragments; intact runs are
+    # usually a few hundred charge-state/adduct variants of 1-3 species.
+    if n < 600:
+        reasons.append(f"Only {n} data points — hydrolysis ladders are typically 1,000+.")
+
+    # A real ladder populates most blocks across a continuous mass range.
+    # Intact data tends to cluster around a couple of masses with large gaps.
+    if "block" in df.columns and n > 0:
+        used_blocks = int(df["block"].nunique())
+        block_span = max(int(df["block"].max() - df["block"].min()) + 1, 1)
+        coverage_ratio = used_blocks / block_span
+        if coverage_ratio < 0.5 and block_span > 10:
+            reasons.append(
+                f"Only {used_blocks}/{block_span} blocks in range are populated — "
+                "points look clustered rather than forming a continuous ladder."
+            )
+
+    likely_intact = len(reasons) >= 2 or frac_over_range > 0.03
+    return {"likely_intact": likely_intact, "reasons": reasons}
+
+
+# ---------------------------------------------------------------------------
 # POST /sequencing-assist/upload-raw
 # ---------------------------------------------------------------------------
 
@@ -572,6 +622,8 @@ async def sequencing_assist_upload_raw(
         ) from exc
 
     df.to_parquet(session_dir / "parsed.parquet", index=False)
+
+    data_type_warning = _detect_data_type(df)
 
     preview_rows = df.head(5)[["M", "I", "T", "block", "Rel_I"]].round(4).to_dict(orient="records")
 
@@ -610,6 +662,7 @@ async def sequencing_assist_upload_raw(
         "preview_rows": preview_rows,
         "scatter_points": scatter_points,
         "sigmoid_points": sigmoid_points,
+        "data_type_warning": data_type_warning,
     })
 
 
@@ -696,15 +749,22 @@ async def sequencing_assist_run_pipeline(
     n = len(data_sorted)
     is_used = data_sorted["peak_status"].isin(["primary_used", "ambiguous_retained", "conflict_retained", "reference_reused"]) if "peak_status" in data_sorted.columns else pd.Series(False, index=data_sorted.index)
 
-    bins = [(0, 0.02), (0.02, 0.05), (0.05, 0.10), (0.10, 0.20), (0.20, 0.50), (0.50, 1.0)]
+    bins = [
+        (0, 0.02,   "Top 0–2%"),
+        (0.02, 0.05, "Top 2–5%"),
+        (0.05, 0.10, "Top 5–10%"),
+        (0.10, 0.20, "Top 10–20%"),
+        (0.20, 0.50, "Top 20–50%"),
+        (0.50, 1.0,  "Bottom 50%"),
+    ]
     coverage_bins = []
-    for lo_frac, hi_frac in bins:
+    for lo_frac, hi_frac, label in bins:
         i_lo, i_hi = int(n * lo_frac), int(n * hi_frac)
         subset = is_used.iloc[i_lo:i_hi]
         total = len(subset)
         matched = int(subset.sum())
         coverage_bins.append({
-            "label": f"Top {int(lo_frac*100)}–{int(hi_frac*100)}%",
+            "label": label,
             "total": total,
             "matched": matched,
             "pct": round(matched / total * 100, 1) if total > 0 else 0,

@@ -24,3 +24,6 @@ frontend/out/
 backend/__pycache__/
 backend/*.pyc
 .vercel
+
+# Claude Code session state (worktrees, local settings) — not project content
+.claude/

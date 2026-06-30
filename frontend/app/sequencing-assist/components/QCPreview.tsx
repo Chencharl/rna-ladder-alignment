@@ -20,6 +20,21 @@ export function QCPreview({
         <Field label="RT range" value={`${data.rt_range[0].toFixed(2)} – ${data.rt_range[1].toFixed(2)} min`} />
       </div>
 
+      {data.data_type_warning?.likely_intact && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 mb-4">
+          <strong>This looks like intact mass data, not a hydrolysis ladder.</strong> The
+          nested base-calling algorithm assumes a ladder of fragments spanning a wide mass
+          range — running it on intact data tends to produce noisy, low-confidence reads
+          that aren&apos;t meaningful. You can still run the pipeline, but treat any
+          candidate reads as unreliable.
+          <ul className="mt-1.5 list-disc list-inside space-y-0.5 text-amber-700">
+            {data.data_type_warning.reasons.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-2">
         First 5 parsed rows (M, I, T, block, Rel_I)
       </p>

@@ -83,12 +83,20 @@ export default function SequencingAssist() {
   const [pipelineMeta, setPipelineMeta] = useState<{subsampled: boolean; nOriginal: number; nPipeline: number} | null>(null);
   const [selectedReadRank, setSelectedReadRank] = useState<number | null>(null);
 
-  // Advanced mode: manual file upload (existing flow)
+  // Advanced section: detail tables, export, sample comparison, and the
+  // legacy manual file-upload flow — collapsed by default so the primary
+  // view stays to the four panels reviewed first: scatter, sigmoid,
+  // coverage, candidate reads.
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [advancedRun, setAdvancedRun] = useState<LoadedRun>(EMPTY_RUN);
   const [advancedUnmatched, setAdvancedUnmatched] = useState<string[]>([]);
   const [advancedLoading, setAdvancedLoading] = useState(false);
   const [advancedError, setAdvancedError] = useState<string | null>(null);
+
+  const selectReadAndExpand = useCallback((rank: number) => {
+    setSelectedReadRank(rank);
+    setShowAdvanced(true);
+  }, []);
 
   function handleExcelUploaded(result: UploadRawResponse) {
     setUploadResult(result);
@@ -216,8 +224,8 @@ export default function SequencingAssist() {
             </div>
           )}
 
-          {/* Phase 1+: Scatter plot shows immediately after Excel upload (background cloud) */}
-          {/* Chains overlay added after pipeline completes */}
+          {/* Core view (1 of 4): Scatter plot — shows immediately after Excel upload */}
+          {/* (background cloud). Chains overlay added after pipeline completes. */}
           {uploadResult && phase !== "idle" && (
             <PeakScatterPlot
               rawScatter={uploadResult.scatter_points}
@@ -225,12 +233,12 @@ export default function SequencingAssist() {
               topParallel={topParallel}
               peakStatus={peakStatus}
               selectedReadRank={selectedReadRank}
-              onSelectRead={setSelectedReadRank}
+              onSelectRead={selectReadAndExpand}
             />
           )}
 
-          {/* Phase 1+: Sigmoid curve (mass vs RT) — shows immediately after upload */}
-          {/* After pipeline, upgrades to matched/unmatched coloring + chain overlays */}
+          {/* Core view (2 of 4): Sigmoid curve (mass vs RT) — shows immediately */}
+          {/* after upload; upgrades to matched/unmatched coloring + chains after pipeline. */}
           {uploadResult && phase !== "idle" && (
             <MassRTPlot
               points={uploadResult.sigmoid_points}
@@ -239,59 +247,58 @@ export default function SequencingAssist() {
             />
           )}
 
-          {/* Phase 2: Pipeline output panels */}
+          {/* Core view (3 + 4 of 4): Coverage and candidate reads — need pipeline output */}
           {hasResults && (
             <>
               <CoverageByIntensity bins={coverageBins} />
 
-              <RunOverview report={report} />
-
-              <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                <div className="xl:col-span-2">
-                  <TopParallelReads
-                    rows={topParallel}
-                    selectedReadRank={selectedReadRank}
-                    onSelectRead={setSelectedReadRank}
-                  />
-                </div>
-                <div>
-                  <ClassificationDetail
-                    selectedReadRank={selectedReadRank}
-                    classificationEvidence={classificationEvidence}
-                    decisions={decisions}
-                  />
-                </div>
-              </div>
-
-              <DecisionTable
-                decisions={decisions}
-                topParallel={topParallel}
+              <TopParallelReads
+                rows={topParallel}
                 selectedReadRank={selectedReadRank}
-                onSelectRead={setSelectedReadRank}
+                onSelectRead={selectReadAndExpand}
               />
-
-              <PeakStatusTable rows={peakStatus} onSelectRead={setSelectedReadRank} />
-
-              <ExportPanel run={advancedRun} />
             </>
           )}
 
-          {/* Compare second sample (e.g. HEK vs HepG2) */}
-          {phase === "pipeline_complete" && (
-            <CompareSection sessionId={uploadResult?.session_id ?? null} primaryScatter={uploadResult?.scatter_points ?? null} />
-          )}
-
-          {/* Advanced: manual file upload (existing flow) */}
+          {/* Advanced: detail tables, export, sample comparison, legacy upload */}
           <div className="border-t border-gray-200 pt-4">
             <button
               type="button"
               onClick={() => setShowAdvanced(!showAdvanced)}
               className="text-sm font-medium text-gray-500 hover:text-gray-700"
             >
-              {showAdvanced ? "Hide" : "Show"} advanced: load existing pipeline output files
+              {showAdvanced ? "Hide advanced" : "Show advanced: evidence detail, export, compare samples"}
             </button>
+
             {showAdvanced && (
-              <div className="mt-4">
+              <div className="mt-4 space-y-6">
+                {hasResults && (
+                  <>
+                    <RunOverview report={report} />
+
+                    <ClassificationDetail
+                      selectedReadRank={selectedReadRank}
+                      classificationEvidence={classificationEvidence}
+                      decisions={decisions}
+                    />
+
+                    <DecisionTable
+                      decisions={decisions}
+                      topParallel={topParallel}
+                      selectedReadRank={selectedReadRank}
+                      onSelectRead={setSelectedReadRank}
+                    />
+
+                    <PeakStatusTable rows={peakStatus} onSelectRead={setSelectedReadRank} />
+
+                    <ExportPanel run={advancedRun} />
+                  </>
+                )}
+
+                {phase === "pipeline_complete" && (
+                  <CompareSection sessionId={uploadResult?.session_id ?? null} primaryScatter={uploadResult?.scatter_points ?? null} />
+                )}
+
                 <Card
                   title="Load pipeline output files"
                   subtitle="If you already have output files from trna_nested_algorithm.py, upload them here."

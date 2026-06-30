@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 
 // ---------------------------------------------------------------------------
@@ -61,6 +62,7 @@ const RESIDUE_MASS: Record<string, number> = {
   A: 329.0525, U: 306.0253, C: 305.0413, G: 345.0474,
 };
 const TERM_MID: Record<string, number> = { "5": 97.9769, "3": -61.95579 };
+const TERM_5_SYNTHETIC = 18.015;
 const TERM_FULL = 18.0106;
 
 // ---------------------------------------------------------------------------
@@ -68,7 +70,11 @@ const TERM_FULL = 18.0106;
 // ---------------------------------------------------------------------------
 
 /** Compute theoretical ladder rows for one direction from a 5′→3′ sequence. */
-function computeTheoRows(seq5: string, direction: "5" | "3"): TheoRow[] {
+function computeTheoRows(
+  seq5: string,
+  direction: "5" | "3",
+  sampleType: "natural_RNA" | "synthetic_RNA" = "natural_RNA"
+): TheoRow[] {
   const s   = direction === "5" ? seq5 : Array.from(seq5).reverse().join("");
   const n   = s.length;
   const rows: TheoRow[] = [];
@@ -76,7 +82,10 @@ function computeTheoRows(seq5: string, direction: "5" | "3"): TheoRow[] {
   for (let i = 0; i < n; i++) {
     const base = s[i];
     cum += RESIDUE_MASS[base] ?? 0;
-    const terminal = i === n - 1 ? TERM_FULL : TERM_MID[direction];
+    const mid = direction === "5" && sampleType === "synthetic_RNA"
+      ? TERM_5_SYNTHETIC
+      : TERM_MID[direction];
+    const terminal = i === n - 1 ? TERM_FULL : mid;
     rows.push({ pos: i + 1, base, mass: Math.round((cum + terminal) * 1e5) / 1e5 });
   }
   return rows;
@@ -102,7 +111,10 @@ function cleanSequence(raw: string): string {
  *   - "csv3"     — CSV content with first column named "3'" (3′ direction)
  *   - "invalid"  — something typed but unrecognisable / bad chars
  */
-function parseInput(raw: string): RecognitionResult {
+function parseInput(
+  raw: string,
+  sampleType: "natural_RNA" | "synthetic_RNA" = "natural_RNA"
+): RecognitionResult {
   const trimmed = raw.trim();
   if (!trimmed) return { format: "empty", sequence: "", theo5: [], theo3: [] };
 
@@ -142,7 +154,7 @@ function parseInput(raw: string): RecognitionResult {
             format:   "csv5",
             sequence: seq,
             theo5:    csvRows,
-            theo3:    computeTheoRows(seq, "3"),
+            theo3:    computeTheoRows(seq, "3", sampleType),
           };
         } else {
           // 3′ CSV: bases are in 3′→5′ order → reverse to get 5′→3′
@@ -150,7 +162,7 @@ function parseInput(raw: string): RecognitionResult {
           return {
             format:   "csv3",
             sequence: seq,
-            theo5:    computeTheoRows(seq, "5"),
+            theo5:    computeTheoRows(seq, "5", sampleType),
             theo3:    csvRows,
           };
         }
@@ -189,8 +201,8 @@ function parseInput(raw: string): RecognitionResult {
   return {
     format:   isFasta ? "fasta" : "sequence",
     sequence: cleaned,
-    theo5:    computeTheoRows(cleaned, "5"),
-    theo3:    computeTheoRows(cleaned, "3"),
+    theo5:    computeTheoRows(cleaned, "5", sampleType),
+    theo3:    computeTheoRows(cleaned, "3", sampleType),
   };
 }
 
@@ -647,6 +659,7 @@ export default function Home() {
   // Common state
   const [ladderFile, setLadderFile] = useState<File | null>(null);
   const [sampleName, setSampleName] = useState("Sample");
+  const [sampleType, setSampleType] = useState<"natural_RNA" | "synthetic_RNA">("natural_RNA");
 
   // Config state (mirrors AlignConfig defaults)
   const [showConfig,   setShowConfig]   = useState(false);
@@ -664,7 +677,7 @@ export default function Home() {
   const [result,  setResult]  = useState<AlignResponse | null>(null);
 
   // ── Recognition — derived from rnaSequence, memoised ─────────────────
-  const recognition = useMemo(() => parseInput(rnaSequence), [rnaSequence]);
+  const recognition = useMemo(() => parseInput(rnaSequence, sampleType), [rnaSequence, sampleType]);
 
   // ── Readiness check ───────────────────────────────────────────────────
   const seqReady =
@@ -689,6 +702,7 @@ export default function Home() {
     const form = new FormData();
     form.append("ladder_file",            ladderFile);
     form.append("sample_name",            sampleName);
+    form.append("sample_type",            sampleType);
     form.append("reject_below_5p",        String(reject5p));
     form.append("reject_below_3p",        String(reject3p));
     form.append("strict_abs_da",          String(strictAbs));
@@ -773,14 +787,22 @@ export default function Home() {
       <div className="max-w-5xl mx-auto px-4 py-10">
 
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
-            RNA Ladder Alignment
-          </h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Upload your ladder data, supply the RNA sequence or theoretical CSV
-            files, then click <strong>Run Alignment</strong>.
-          </p>
+        <div className="mb-8 flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+              RNA Ladder Alignment
+            </h1>
+            <p className="mt-1 text-sm text-gray-500">
+              Upload your ladder data, supply the RNA sequence or theoretical CSV
+              files, then click <strong>Run Alignment</strong>.
+            </p>
+          </div>
+          <Link
+            href="/sequencing-assist"
+            className="shrink-0 text-sm font-medium text-blue-600 hover:text-blue-800 mt-1"
+          >
+            Sequencing Assist &rarr;
+          </Link>
         </div>
 
         <form onSubmit={handleSubmit}>
@@ -862,6 +884,20 @@ export default function Home() {
                 <p className="text-xs text-gray-400 mt-1">
                   Used in output filenames and the Excel sheet title.
                 </p>
+              </div>
+
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-800 mb-1">
+                  Sample chemistry
+                </label>
+                <select
+                  value={sampleType}
+                  onChange={(e) => setSampleType(e.target.value as "natural_RNA" | "synthetic_RNA")}
+                  className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="natural_RNA">Natural RNA (5′ offset 97.9769)</option>
+                  <option value="synthetic_RNA">Synthetic RNA (5′ offset 18.015)</option>
+                </select>
               </div>
             </div>
 
