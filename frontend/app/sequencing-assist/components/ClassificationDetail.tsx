@@ -24,8 +24,8 @@ export function ClassificationDetail({
 
   return (
     <Card
-      title="Classification Evidence"
-      subtitle="The scientific core: why a read was called 5′, 3′, ambiguous, or conflict."
+      title="Terminal-Direction Evidence"
+      subtitle="Basis for 5′/3′ classification of the selected candidate read. All calls require independent verification."
     >
       {selectedReadRank == null ? (
         <EmptyState>

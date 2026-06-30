@@ -52,8 +52,8 @@ export function DecisionTable({
 
   return (
     <Card
-      title="Sequencing Decision Table"
-      subtitle="What to actually do with each read. Defaults to the reads that matter most -- not every row at once."
+      title="Review Priority Table"
+      subtitle="Recommended review action per candidate read. High-confidence calls still require intact mass and branch evidence verification before reporting as sequence results."
     >
       {!decisions ? (
         <EmptyState>Upload sequencing_decision_summary.csv to see suggested actions.</EmptyState>

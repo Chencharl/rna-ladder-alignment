@@ -47,7 +47,7 @@ export function PeakStatusTable({
   }
 
   return (
-    <Card title="Peak Status" subtitle="Every peak in the run and how it was used.">
+    <Card title="Peak Usage" subtitle="All peaks and their assignment status. 'Unused' peaks — especially high-intensity ones — are candidates for unexplained signals, partial modifications, or isoforms.">
       {!rows ? (
         <EmptyState>Upload Peak_Status.csv to inspect peak-level usage.</EmptyState>
       ) : (

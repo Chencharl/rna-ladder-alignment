@@ -1,5 +1,6 @@
 import type { BaseCallingReport } from "../lib/types";
 import { Card, EmptyState, StatCard, fmt } from "./ui";
+import { ReadCallDonut, PeakUsageDonut } from "./SummaryCharts";
 
 export function RunOverview({ report }: { report: BaseCallingReport | null }) {
   if (!report) {
@@ -32,23 +33,31 @@ export function RunOverview({ report }: { report: BaseCallingReport | null }) {
 
       <InfoCell label="Recovered reads" value={String(report.n_chains)} className="mb-5" big />
 
-      <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-2">
-        Read calls (5′ / 3′ / ambiguous / conflict)
-      </p>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-        <StatCard label="5′" value={rc?.["5prime"] ?? 0} colour="bg-blue-50 border-blue-200 text-blue-800" />
-        <StatCard label="3′" value={rc?.["3prime"] ?? 0} colour="bg-purple-50 border-purple-200 text-purple-800" />
-        <StatCard label="Ambiguous" value={rc?.ambiguous ?? 0} colour="bg-yellow-50 border-yellow-200 text-yellow-800" />
-        <StatCard label="Conflict" value={rc?.conflict ?? 0} colour="bg-orange-50 border-red-200 text-orange-800" />
-      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-2">
+            Read calls (5′ / 3′ / ambiguous / conflict)
+          </p>
+          <ReadCallDonut report={report} />
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
+            <StatCard label="5′" value={rc?.["5prime"] ?? 0} colour="bg-blue-50 border-blue-200 text-blue-800" />
+            <StatCard label="3′" value={rc?.["3prime"] ?? 0} colour="bg-purple-50 border-purple-200 text-purple-800" />
+            <StatCard label="Ambig." value={rc?.ambiguous ?? 0} colour="bg-yellow-50 border-yellow-200 text-yellow-800" />
+            <StatCard label="Conflict" value={rc?.conflict ?? 0} colour="bg-orange-50 border-red-200 text-orange-800" />
+          </div>
+        </div>
 
-      <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-2">Peak usage</p>
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <StatCard label="Primary used" value={ps?.primary_used ?? 0} colour="bg-green-50 border-green-200 text-green-800" />
-        <StatCard label="Ambiguous" value={ps?.ambiguous_retained ?? 0} colour="bg-yellow-50 border-yellow-200 text-yellow-800" />
-        <StatCard label="Conflict" value={ps?.conflict_retained ?? 0} colour="bg-orange-50 border-red-200 text-orange-800" />
-        <StatCard label="Ref. reused" value={ps?.reference_reused ?? 0} colour="bg-teal-50 border-teal-200 text-teal-800" />
-        <StatCard label="Unused" value={ps?.unused ?? 0} colour="bg-gray-50 border-gray-200 text-gray-500" />
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-2">Peak usage</p>
+          <PeakUsageDonut report={report} />
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
+            <StatCard label="Primary" value={ps?.primary_used ?? 0} colour="bg-green-50 border-green-200 text-green-800" />
+            <StatCard label="Ambig." value={ps?.ambiguous_retained ?? 0} colour="bg-yellow-50 border-yellow-200 text-yellow-800" />
+            <StatCard label="Conflict" value={ps?.conflict_retained ?? 0} colour="bg-orange-50 border-red-200 text-orange-800" />
+            <StatCard label="Ref. reused" value={ps?.reference_reused ?? 0} colour="bg-teal-50 border-teal-200 text-teal-800" />
+            <StatCard label="Unused" value={ps?.unused ?? 0} colour="bg-gray-50 border-gray-200 text-gray-500" />
+          </div>
+        </div>
       </div>
     </Card>
   );

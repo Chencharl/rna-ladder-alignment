@@ -26,8 +26,8 @@ export function TopParallelReads({
 
   return (
     <Card
-      title="Top Parallel Reads"
-      subtitle="The most important panel: the highest-ranked reads recovered by the algorithm. Start here."
+      title="Candidate Short Reads"
+      subtitle="Highest-ranked candidate short reads recovered by the nested ladder algorithm. Require manual verification against intact mass and branch evidence before use as primary sequencing evidence."
     >
       {groups.length === 0 ? (
         <EmptyState>Upload top_parallel_reads_long.csv to see the top reads.</EmptyState>

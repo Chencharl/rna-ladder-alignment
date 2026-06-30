@@ -9,10 +9,13 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@next/swc-darwin-arm64": "^16.2.9",
     "next": "14.2.3",
     "papaparse": "^5.4.1",
+    "plotly.js-basic-dist-min": "^3.6.0",
     "react": "^18",
-    "react-dom": "^18"
+    "react-dom": "^18",
+    "react-plotly.js": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^20",
