@@ -636,6 +636,9 @@ async def sequencing_assist_upload_raw(
             .reset_index(drop=True)
             .sort_values("M", ignore_index=True)
         )
+        # pandas 3.x drops the group-key column from apply output when
+        # include_groups=False; recompute block from M so it's in the parquet.
+        df["block"] = (df["M"] / BLOCK_WIDTH_DA).round().astype(int).clip(1, N_BLOCKS)
         was_pre_subsampled = True
 
     df.to_parquet(session_dir / "parsed.parquet", index=False)
@@ -718,6 +721,8 @@ async def sequencing_assist_run_pipeline(
         df = df.groupby("block").apply(
             lambda g: g.nlargest(25, "I"), include_groups=False
         ).reset_index(drop=True).sort_values("M", ignore_index=True)
+        # pandas 3.x drops the group-key column; recompute block from M.
+        df["block"] = (df["M"] / BLOCK_WIDTH_DA).round().astype(int).clip(1, N_BLOCKS)
         was_subsampled = True
 
     out_dir = session_dir / "output"
