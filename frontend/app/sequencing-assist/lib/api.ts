@@ -22,8 +22,11 @@ export interface UploadRawResponse {
   session_id: string;
   filename: string;
   n_points: number;
+  n_points_stored: number;
+  was_pre_subsampled?: boolean;
   mass_range: [number, number];
   rt_range: [number, number];
+  rt_spread_minutes: number;
   n_blocks: number;
   preview_rows: Array<{ M: number; I: number; T: number; block: number; Rel_I: number }>;
   scatter_points: ScatterPoint[];
@@ -48,6 +51,9 @@ export interface PipelineResponse {
   peak_status: Record<string, unknown>[] | null;
   read_summary: Record<string, unknown>[] | null;
   top_chains_for_plot: ChainPoint[] | null;
+  n_chains_total: number;
+  n_chains_min_10: number;
+  min_chain_len_shown: number;
   coverage_by_intensity: CoverageBin[] | null;
   sigmoid_post_pipeline: SigmoidPostPoint[] | null;
   was_subsampled: boolean;

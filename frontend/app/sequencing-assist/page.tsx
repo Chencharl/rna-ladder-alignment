@@ -80,7 +80,10 @@ export default function SequencingAssist() {
   const [topChainsForPlot, setTopChainsForPlot] = useState<ChainPoint[] | null>(null);
   const [coverageBins, setCoverageBins] = useState<CoverageBin[] | null>(null);
   const [sigmoidPost, setSigmoidPost] = useState<SigmoidPostPoint[] | null>(null);
-  const [pipelineMeta, setPipelineMeta] = useState<{subsampled: boolean; nOriginal: number; nPipeline: number} | null>(null);
+  const [pipelineMeta, setPipelineMeta] = useState<{
+    subsampled: boolean; nOriginal: number; nPipeline: number;
+    nChainsTotal: number; nChainsMin10: number; minChainLenShown: number;
+  } | null>(null);
   const [selectedReadRank, setSelectedReadRank] = useState<number | null>(null);
 
   // Advanced section: detail tables, export, sample comparison, and the
@@ -137,6 +140,9 @@ export default function SequencingAssist() {
         subsampled: result.was_subsampled,
         nOriginal: result.n_original_points,
         nPipeline: result.n_pipeline_points,
+        nChainsTotal: result.n_chains_total ?? 0,
+        nChainsMin10: result.n_chains_min_10 ?? 0,
+        minChainLenShown: result.min_chain_len_shown ?? 10,
       });
 
       setPhase("pipeline_complete");
@@ -218,32 +224,43 @@ export default function SequencingAssist() {
             </div>
           )}
 
+          {uploadResult?.was_pre_subsampled && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              <strong>Large file:</strong> {uploadResult.n_points.toLocaleString()} points loaded — stored top-50-per-block
+              ({uploadResult.n_points_stored.toLocaleString()} points) for efficient processing. Charge 1 data is dense;
+              Charge 2 datasets are preferred for final sequencing analysis.
+            </div>
+          )}
+
           {pipelineMeta?.subsampled && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              <strong>Note:</strong> This file had {pipelineMeta.nOriginal.toLocaleString()} points (likely Charge 1 data). The pipeline ran on the top-25-per-block subset ({pipelineMeta.nPipeline.toLocaleString()} points) for performance. Charge 1 data has high false-coverage risk — Charge 2 datasets are preferred for final sequencing analysis.
+              <strong>Pipeline subsampled:</strong> Ran on top-25-per-block subset
+              ({pipelineMeta.nPipeline.toLocaleString()} / {pipelineMeta.nOriginal.toLocaleString()} points).
+              Charge 1 data has high false-coverage risk — Charge 2 is preferred.
             </div>
           )}
 
           {/* Core view (1 of 4): Scatter plot — shows immediately after Excel upload */}
-          {/* (background cloud). Chains overlay added after pipeline completes. */}
           {uploadResult && phase !== "idle" && (
             <PeakScatterPlot
               rawScatter={uploadResult.scatter_points}
               topChains={topChainsForPlot}
               topParallel={topParallel}
               peakStatus={peakStatus}
+              minChainLen={pipelineMeta?.minChainLenShown}
+              nChainsTotal={pipelineMeta?.nChainsTotal}
               selectedReadRank={selectedReadRank}
               onSelectRead={selectReadAndExpand}
             />
           )}
 
-          {/* Core view (2 of 4): Sigmoid curve (mass vs RT) — shows immediately */}
-          {/* after upload; upgrades to matched/unmatched coloring + chains after pipeline. */}
+          {/* Core view (2 of 4): Sigmoid — shows immediately after upload, upgrades after pipeline */}
           {uploadResult && phase !== "idle" && (
             <MassRTPlot
               points={uploadResult.sigmoid_points}
               postPipeline={sigmoidPost}
               topChains={topChainsForPlot}
+              minChainLen={pipelineMeta?.minChainLenShown}
             />
           )}
 

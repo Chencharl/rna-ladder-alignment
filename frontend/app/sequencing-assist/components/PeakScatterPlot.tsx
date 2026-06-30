@@ -8,18 +8,12 @@ import { Card, EmptyState } from "./ui";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
+// Call-type colours — consistent across scatter and sigmoid
 const CALL_COLORS: Record<string, string> = {
-  "5'": "#0000CC",
-  "3'": "#9900CC",
-  ambiguous: "#FF8C00",
-  conflict: "#CC0000",
-};
-
-const CALL_LINE_COLORS: Record<string, string> = {
-  "5'": "#2222FF",
-  "3'": "#AA44DD",
-  ambiguous: "#FFAA33",
-  conflict: "#FF3333",
+  "5'":       "#1a56db",  // strong blue
+  "3'":       "#7e3af2",  // purple
+  ambiguous:  "#d97706",  // amber
+  conflict:   "#c81e1e",  // red
 };
 
 function normalizeCall(raw: string | null | undefined): string {
@@ -36,244 +30,259 @@ interface Props {
   topChains: ChainPoint[] | null;
   topParallel: TopParallelRow[] | null;
   peakStatus: PeakStatusRow[] | null;
+  minChainLen?: number;        // passed from pipeline response (min_chain_len_shown)
+  nChainsTotal?: number;       // total chains before filter (n_chains_total)
   selectedReadRank: number | null;
   onSelectRead: (rank: number) => void;
 }
 
-export function PeakScatterPlot({ rawScatter, topChains, topParallel, peakStatus, selectedReadRank, onSelectRead }: Props) {
+export function PeakScatterPlot({
+  rawScatter,
+  topChains,
+  topParallel,
+  peakStatus,
+  minChainLen = 10,
+  nChainsTotal,
+  selectedReadRank,
+  onSelectRead,
+}: Props) {
+
   const traces = useMemo(() => {
     const result: any[] = [];
 
-    // Background cloud from raw upload (Step 5 visualization)
-    // Uses regular scatter (not gl) with open circles for the reference look.
-    // For >15k points, uses scattergl with filled markers (WebGL can't render open circles well).
-    if (rawScatter && rawScatter.length > 0) {
-      const useGl = rawScatter.length > 5000;
+    // ── Background cloud (Step 5 scatter) ────────────────────────────────
+    const bgSource = rawScatter || (peakStatus ? peakStatus.map(p => ({
+      M: p.mass, Rel_I: p.rel_intensity, T: p.rt, block: p.block,
+    })) : null);
+
+    if (bgSource && bgSource.length > 0) {
+      const useGl = bgSource.length > 5000;
       result.push({
-        x: rawScatter.map((p) => p.M),
-        y: rawScatter.map((p) => p.Rel_I),
+        x: bgSource.map((p) => p.M),
+        y: bgSource.map((p) => p.Rel_I),
         mode: "markers",
         type: useGl ? "scattergl" : "scatter",
         name: "All peaks",
+        legendgroup: "bg",
         marker: useGl
-          ? { color: "#1B6B7D", size: 3, opacity: 0.5 }
-          : { color: "rgba(0,0,0,0)", size: 5, line: { color: "#1B6B7D", width: 1 }, symbol: "circle-open" },
+          ? { color: "#1a56db", size: 3, opacity: 0.35 }
+          : { color: "rgba(0,0,0,0)", size: 5, line: { color: "#1a56db", width: 0.8 }, symbol: "circle-open" },
         hoverinfo: "text",
-        text: rawScatter.map((p) =>
-          `Mass: ${p.M.toFixed(4)}<br>Rel.I: ${p.Rel_I.toFixed(4)}<br>RT: ${p.T.toFixed(4)}<br>Block: ${p.block}`
-        ),
-      });
-    } else if (peakStatus && peakStatus.length > 0) {
-      const useGl = peakStatus.length > 5000;
-      result.push({
-        x: peakStatus.map((p) => p.mass),
-        y: peakStatus.map((p) => p.rel_intensity),
-        mode: "markers",
-        type: useGl ? "scattergl" : "scatter",
-        name: "All peaks",
-        marker: useGl
-          ? { color: "#1B6B7D", size: 3, opacity: 0.5 }
-          : { color: "rgba(0,0,0,0)", size: 5, line: { color: "#1B6B7D", width: 1 }, symbol: "circle-open" },
-        hoverinfo: "text",
-        text: peakStatus.map((p) =>
-          `Mass: ${p.mass.toFixed(4)}<br>Rel.I: ${p.rel_intensity.toFixed(4)}<br>RT: ${p.rt.toFixed(4)}<br>Block: ${p.block}<br>Status: ${p.peak_status}`
+        text: bgSource.map((p) =>
+          `Mass: ${p.M.toFixed(4)}<br>Rel.I: ${p.Rel_I.toFixed(4)}<br>RT: ${p.T.toFixed(2)}<br>Block: ${p.block}`
         ),
       });
     }
 
-    // Top chains by length from pipeline (primary overlay for real data)
-    if (topChains && topChains.length > 0) {
+    // ── Chain overlays with GROUPED legend ───────────────────────────────
+    const chainsSource = topChains ?? null;
+
+    if (chainsSource && chainsSource.length > 0) {
       const byChain = new Map<number, ChainPoint[]>();
-      for (const p of topChains) {
+      for (const p of chainsSource) {
         const list = byChain.get(p.chain_index) ?? [];
         list.push(p);
         byChain.set(p.chain_index, list);
       }
 
-      const palette = ["#0000CC", "#9900CC", "#008800", "#CC0000", "#FF8C00", "#0088CC", "#CC00CC", "#888800", "#00CCCC", "#CC4400"];
-      let colorIdx = 0;
-      for (const [chainIdx, points] of byChain) {
-        const sorted = points.sort((a, b) => a.mass - b.mass);
+      // One invisible dummy trace per call type → single legend entry per type
+      const typesPresent = new Set(
+        [...byChain.values()].map((pts) => normalizeCall(pts[0]?.ladder_type))
+      );
+      for (const callType of ["5'", "3'", "ambiguous", "conflict"]) {
+        if (!typesPresent.has(callType)) continue;
+        result.push({
+          x: [], y: [],
+          mode: "lines+markers",
+          type: "scatter",
+          name: callType,
+          legendgroup: callType,
+          showlegend: true,
+          line: { color: CALL_COLORS[callType], width: 2.5 },
+          marker: { color: CALL_COLORS[callType], size: 7 },
+        });
+      }
+
+      for (const [chainIdx, pts] of byChain) {
+        const sorted = pts.sort((a, b) => a.mass - b.mass);
         const call = normalizeCall(sorted[0].ladder_type);
-        const color = CALL_LINE_COLORS[call] || palette[colorIdx % palette.length];
-        const markerColor = CALL_COLORS[call] || palette[colorIdx % palette.length];
+        const color = CALL_COLORS[call] ?? "#888";
+        const n = sorted[0].n_points;
 
         result.push({
           x: sorted.map((p) => p.mass),
           y: sorted.map((p) => p.rel_i),
           mode: "lines+markers",
           type: "scatter",
-          name: `#${chainIdx + 1} ${call} (${sorted.length}pt)`,
-          line: { color, width: 2 },
-          marker: { color: markerColor, size: 6 },
+          name: `#${chainIdx + 1} ${call} (${n}nt)`,
+          legendgroup: call,
+          showlegend: false,           // legend handled by the dummy trace above
+          line: { color, width: 2.5 },
+          marker: { color, size: 7, line: { color: "#fff", width: 1 } },
           hoverinfo: "text",
           text: sorted.map((p) =>
-            `<b>Chain #${chainIdx + 1} (${call})</b><br>Mass: ${p.mass.toFixed(2)}<br>Rel.I: ${p.rel_i.toFixed(4)}<br>RT: ${p.rt.toFixed(2)}<br>Length: ${p.n_points} pts`
+            `<b>Chain #${chainIdx + 1} · ${call} · ${n} nt</b><br>` +
+            `Mass: ${p.mass.toFixed(2)} Da<br>` +
+            `Rel.I: ${p.rel_i.toFixed(4)}<br>` +
+            `RT: ${p.rt.toFixed(2)} min`
           ),
         });
-        colorIdx++;
       }
-    }
-
-    // Chain overlays from top_parallel_reads_long (fallback for advanced upload mode)
-    if (!topChains && topParallel && topParallel.length > 0) {
+    } else if (!topChains && topParallel && topParallel.length > 0) {
+      // Fallback: advanced-upload mode using top_parallel_reads_long
       const byRank = new Map<number, TopParallelRow[]>();
       for (const r of topParallel) {
         const list = byRank.get(r.read_rank) ?? [];
         list.push(r);
         byRank.set(r.read_rank, list);
+      }
+
+      const typesPresent = new Set(
+        [...byRank.values()].map((rows) => normalizeCall(rows[0]?.ladder_call))
+      );
+      for (const callType of ["5'", "3'", "ambiguous", "conflict"]) {
+        if (!typesPresent.has(callType)) continue;
+        result.push({
+          x: [], y: [], mode: "lines+markers", type: "scatter",
+          name: callType, legendgroup: callType, showlegend: true,
+          line: { color: CALL_COLORS[callType], width: 2.5 },
+          marker: { color: CALL_COLORS[callType], size: 7 },
+        });
       }
 
       for (const [rank, rows] of byRank) {
         const sorted = rows.sort((a, b) => a.row_position - b.row_position);
         const call = normalizeCall(sorted[0].ladder_call);
         const isSelected = selectedReadRank === rank;
-        const color = CALL_LINE_COLORS[call] || "#999";
-        const markerColor = CALL_COLORS[call] || "#999";
-
-        // Connected line + filled markers for this chain
+        const color = CALL_COLORS[call] ?? "#888";
         result.push({
           x: sorted.map((r) => r.mass),
           y: sorted.map((r) => r.rel_i),
-          mode: "lines+markers",
-          type: "scatter",
-          name: `#${rank} ${call}`,
-          line: {
-            color: color,
-            width: isSelected ? 3 : 2,
-          },
-          marker: {
-            color: markerColor,
-            size: isSelected ? 8 : 5,
-            line: { width: 0 },
-          },
-          opacity: isSelected ? 1.0 : 0.85,
+          mode: "lines+markers", type: "scatter",
+          name: `#${rank} ${call}`, legendgroup: call, showlegend: false,
+          line: { color, width: isSelected ? 3.5 : 2.5 },
+          marker: { color, size: isSelected ? 9 : 7, line: { color: "#fff", width: 1 } },
+          opacity: isSelected ? 1 : 0.85,
           customdata: sorted.map(() => rank),
           hoverinfo: "text",
           text: sorted.map((r) =>
-            `<b>Read #${rank} (${call})</b><br>Mass: ${r.mass.toFixed(4)}<br>Rel.I: ${r.rel_i.toFixed(4)}<br>RT: ${r.rt.toFixed(4)}<br>Call: ${r.call}<br>Pos: ${r.row_position}/${sorted.length}`
+            `<b>Read #${rank} (${call})</b><br>Mass: ${r.mass.toFixed(4)}<br>Rel.I: ${r.rel_i.toFixed(4)}<br>RT: ${r.rt.toFixed(4)}<br>Pos: ${r.row_position}/${sorted.length}`
           ),
         });
-
-        // Add a label annotation for the first point of each chain
-        // (handled via layout.annotations below)
       }
     }
 
     return result;
   }, [rawScatter, topChains, topParallel, peakStatus, selectedReadRank]);
 
+  // Label annotations: one per chain, positioned above the first point
   const annotations = useMemo(() => {
-    const result: any[] = [];
-
-    // Labels from topChains (primary)
-    if (topChains && topChains.length > 0) {
-      const byChain = new Map<number, ChainPoint[]>();
-      for (const p of topChains) {
-        const list = byChain.get(p.chain_index) ?? [];
-        list.push(p);
-        byChain.set(p.chain_index, list);
-      }
-      for (const [chainIdx, points] of byChain) {
-        const sorted = points.sort((a, b) => a.mass - b.mass);
-        const call = normalizeCall(sorted[0].ladder_type);
-        const first = sorted[0];
-        result.push({
-          x: first.mass,
-          y: Math.min(first.rel_i + 0.06, 1.15),
-          text: `#${chainIdx + 1} ${call}`,
-          showarrow: false,
-          font: { size: 9, color: CALL_COLORS[call] || "#666" },
-          xanchor: "center",
-        });
-      }
-    } else if (topParallel) {
-      // Fallback labels from topParallel
-      const byRank = new Map<number, TopParallelRow[]>();
-      for (const r of topParallel) {
-        const list = byRank.get(r.read_rank) ?? [];
-        list.push(r);
-        byRank.set(r.read_rank, list);
-      }
-      for (const [rank, rows] of byRank) {
-        const sorted = rows.sort((a, b) => a.row_position - b.row_position);
-        const call = normalizeCall(sorted[0].ladder_call);
-        const first = sorted[0];
-        result.push({
-          x: first.mass,
-          y: Math.min(first.rel_i + 0.06, 1.15),
-          text: `#${rank} ${call}`,
-          showarrow: false,
-          font: { size: 9, color: CALL_COLORS[call] || "#666" },
-          xanchor: "center",
-        });
-      }
+    const out: any[] = [];
+    const src = topChains ?? null;
+    if (!src) return out;
+    const byChain = new Map<number, ChainPoint[]>();
+    for (const p of src) {
+      const list = byChain.get(p.chain_index) ?? [];
+      list.push(p);
+      byChain.set(p.chain_index, list);
     }
-
-    return result;
-  }, [topChains, topParallel]);
+    for (const [chainIdx, pts] of byChain) {
+      const sorted = pts.sort((a, b) => a.mass - b.mass);
+      const call = normalizeCall(sorted[0].ladder_type);
+      const n = sorted[0].n_points;
+      const first = sorted[0];
+      out.push({
+        x: first.mass,
+        y: Math.min(first.rel_i + 0.07, 1.18),
+        text: `#${chainIdx + 1} ${call}<br><span style="font-size:8px">${n}nt</span>`,
+        showarrow: false,
+        font: { size: 9, color: CALL_COLORS[call] ?? "#666" },
+        xanchor: "center",
+      });
+    }
+    return out;
+  }, [topChains]);
 
   const handleClick = useCallback(
     (event: any) => {
-      const point = event.points?.[0];
-      if (point?.customdata) {
-        onSelectRead(point.customdata as number);
-      }
+      const pt = event.points?.[0];
+      if (pt?.customdata) onSelectRead(pt.customdata as number);
     },
     [onSelectRead]
   );
 
-  const hasData = (rawScatter && rawScatter.length > 0) || (topParallel && topParallel.length > 0) || (peakStatus && peakStatus.length > 0);
+  const hasData =
+    (rawScatter && rawScatter.length > 0) ||
+    (topParallel && topParallel.length > 0) ||
+    (peakStatus && peakStatus.length > 0);
+
+  // Dynamic subtitle showing chain quality
+  const nShown = topChains
+    ? new Set(topChains.map((p) => p.chain_index)).size
+    : null;
+  const chainNote =
+    nShown != null && nChainsTotal != null
+      ? nShown > 0
+        ? `${nShown} chain${nShown > 1 ? "s" : ""} with ≥${minChainLen} ladder positions shown (${nChainsTotal} total recovered).`
+        : `No chains with ≥${minChainLen} ladder positions found — ${nChainsTotal} shorter fragments recovered but not plotted.`
+      : "Open circles = all data points. Colored lines = candidate short reads (≥10 ladder positions).";
 
   return (
     <Card
       title="Relative Intensity vs. Mass"
-      subtitle="Block-wise relative intensity (Step 5). Open circles = all data points. Colored lines = candidate short reads from the pipeline. Click a chain to inspect."
+      subtitle={`Block-wise Rel_I (Step 5). ${chainNote}`}
     >
       {!hasData ? (
-        <EmptyState>Run the pipeline or upload Peak_Status.csv to see the scatter plot.</EmptyState>
+        <EmptyState>Upload a deconvoluted Excel file to see the scatter plot.</EmptyState>
       ) : (
-        <div className="w-full" style={{ height: 550 }}>
-          <Plot
-            data={traces}
-            layout={{
-              autosize: true,
-              margin: { l: 70, r: 20, t: 30, b: 60 },
-              xaxis: {
-                title: { text: "Monoisotopic Mass, M (Da)", font: { size: 13 } },
-                gridcolor: "#e5e7eb",
-                zeroline: false,
-              },
-              yaxis: {
-                title: { text: "Relative Intensity (linear)", font: { size: 13 } },
-                gridcolor: "#e5e7eb",
-                zeroline: false,
-                range: [-0.02, 1.2],
-                dtick: 0.2,
-              },
-              plot_bgcolor: "#ffffff",
-              paper_bgcolor: "transparent",
-              legend: {
-                orientation: "h" as const,
-                y: 1.14,
-                x: 0.5,
-                xanchor: "center" as const,
-                font: { size: 11 },
-              },
-              annotations: annotations,
-              dragmode: "zoom" as const,
-              hovermode: "closest" as const,
-            }}
-            config={{
-              responsive: true,
-              displayModeBar: true,
-              modeBarButtonsToRemove: ["lasso2d", "select2d", "sendDataToCloud"] as any,
-              displaylogo: false,
-            }}
-            style={{ width: "100%", height: "100%" }}
-            onClick={handleClick}
-          />
-        </div>
+        <>
+          {nShown === 0 && nChainsTotal != null && nChainsTotal > 0 && (
+            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {nChainsTotal} chain{nChainsTotal > 1 ? "s" : ""} were recovered but all have fewer than {minChainLen} ladder
+              positions — this suggests insufficient signal for confident base-calling. Check data quality or
+              try a Charge 2 dataset.
+            </div>
+          )}
+          <div className="w-full" style={{ height: 520 }}>
+            <Plot
+              data={traces}
+              layout={{
+                autosize: true,
+                margin: { l: 70, r: 20, t: 20, b: 60 },
+                xaxis: {
+                  title: { text: "Monoisotopic Mass, M (Da)", font: { size: 13 } },
+                  gridcolor: "#e5e7eb", zeroline: false,
+                },
+                yaxis: {
+                  title: { text: "Relative Intensity (linear)", font: { size: 13 } },
+                  gridcolor: "#e5e7eb", zeroline: false,
+                  range: [-0.02, 1.22], dtick: 0.2,
+                },
+                plot_bgcolor: "#ffffff",
+                paper_bgcolor: "transparent",
+                legend: {
+                  orientation: "h" as const,
+                  y: 1.12, x: 0.5, xanchor: "center" as const,
+                  font: { size: 12 },
+                  bgcolor: "rgba(255,255,255,0.85)",
+                  bordercolor: "#e5e7eb",
+                  borderwidth: 1,
+                },
+                annotations,
+                dragmode: "zoom" as const,
+                hovermode: "closest" as const,
+              }}
+              config={{
+                responsive: true,
+                displayModeBar: true,
+                modeBarButtonsToRemove: ["lasso2d", "select2d", "sendDataToCloud"] as any,
+                displaylogo: false,
+              }}
+              style={{ width: "100%", height: "100%" }}
+              onClick={handleClick}
+            />
+          </div>
+        </>
       )}
     </Card>
   );

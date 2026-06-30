@@ -621,6 +621,23 @@ async def sequencing_assist_upload_raw(
             detail=f"Failed to parse Excel file: {exc}",
         ) from exc
 
+    # Pre-subsample extremely large files before saving to parquet.
+    # Charge 1 data can exceed 30-100k points; keeping top-50-per-block
+    # reduces parquet size while preserving the highest-intensity signals
+    # for the pipeline. This is independent of the pipeline's own 8k
+    # auto-subsample: the pipeline subsamples further to top-25 if needed.
+    PRE_SUB_LIMIT = 20000
+    n_original = len(df)
+    was_pre_subsampled = False
+    if n_original > PRE_SUB_LIMIT:
+        df = (
+            df.groupby("block")
+            .apply(lambda g: g.nlargest(50, "I"), include_groups=False)
+            .reset_index(drop=True)
+            .sort_values("M", ignore_index=True)
+        )
+        was_pre_subsampled = True
+
     df.to_parquet(session_dir / "parsed.parquet", index=False)
 
     data_type_warning = _detect_data_type(df)
@@ -652,12 +669,18 @@ async def sequencing_assist_upload_raw(
 
     scatter_points = scatter_df.round(4).to_dict(orient="records")
 
+    rt_vals = df["T"]
+    rt_spread = round(float(rt_vals.max() - rt_vals.min()), 2)
+
     return JSONResponse(content={
         "session_id": session_id,
         "filename": filename,
-        "n_points": len(df),
+        "n_points": int(n_original),
+        "n_points_stored": len(df),
+        "was_pre_subsampled": was_pre_subsampled,
         "mass_range": [round(float(df["M"].min()), 2), round(float(df["M"].max()), 2)],
-        "rt_range": [round(float(df["T"].min()), 2), round(float(df["T"].max()), 2)],
+        "rt_range": [round(float(rt_vals.min()), 2), round(float(rt_vals.max()), 2)],
+        "rt_spread_minutes": rt_spread,
         "n_blocks": int(df["block"].nunique()),
         "preview_rows": preview_rows,
         "scatter_points": scatter_points,
@@ -783,12 +806,20 @@ async def sequencing_assist_run_pipeline(
         sigmoid_post = pd.concat([high, low])
     sigmoid_post_records = sigmoid_post.round(4).to_dict(orient="records")
 
-    # Build top-chains-by-length for the scatter overlay
-    # The top_parallel_reads_long only has top 4 by seed intensity.
-    # For the scatter plot we want the longest/most significant chains.
+    # Build top-chains-by-length for the scatter overlay.
+    # Only include chains with >= 10 ladder positions — shorter chains are not
+    # meaningful for sequencing (they cannot reliably identify a position in a
+    # ~70-95 nt tRNA). Fall back to chains with >= 3 positions if no 10-point
+    # chains exist, so the plot is never silently empty.
     chains_list = result["chains"]
+    n_chains_min_10 = sum(1 for c in chains_list if len(c["indices"]) >= 10)
+    min_len_shown = 10 if n_chains_min_10 > 0 else 3
     top_chains_for_plot = []
-    by_len = sorted(enumerate(chains_list), key=lambda x: len(x[1]["indices"]), reverse=True)
+    by_len = sorted(
+        [(i, c) for i, c in enumerate(chains_list) if len(c["indices"]) >= min_len_shown],
+        key=lambda x: len(x[1]["indices"]),
+        reverse=True,
+    )
     for chain_idx, chain in by_len[:10]:
         rows = data_df.loc[chain["indices"]].sort_values("M")
         for _, row in rows.iterrows():
@@ -812,6 +843,9 @@ async def sequencing_assist_run_pipeline(
         "peak_status": _sanitize(_read_csv_as_records("peak_status_csv")),
         "read_summary": _sanitize(_read_csv_as_records("read_summary_csv")),
         "top_chains_for_plot": _sanitize(top_chains_for_plot),
+        "n_chains_total": len(chains_list),
+        "n_chains_min_10": n_chains_min_10,
+        "min_chain_len_shown": min_len_shown,
         "coverage_by_intensity": coverage_bins,
         "sigmoid_post_pipeline": _sanitize(sigmoid_post_records),
         "was_subsampled": was_subsampled,
