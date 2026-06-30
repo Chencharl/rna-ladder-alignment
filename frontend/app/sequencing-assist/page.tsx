@@ -17,7 +17,7 @@ import { RunOverview } from "./components/RunOverview";
 import { TopParallelReads } from "./components/TopParallelReads";
 import { Card } from "./components/ui";
 import type { UploadRawResponse, PipelineResponse, ChainPoint, CoverageBin, SigmoidPostPoint } from "./lib/api";
-import { runPipeline } from "./lib/api";
+import { runPipeline, downloadResultsUrl } from "./lib/api";
 import { loadFilesIntoRun } from "./lib/parse";
 import type {
   BaseCallingReport,
@@ -85,6 +85,7 @@ export default function SequencingAssist() {
     nChainsTotal: number; nChainsMin10: number; minChainLenShown: number;
   } | null>(null);
   const [selectedReadRank, setSelectedReadRank] = useState<number | null>(null);
+  const [referenceSequence, setReferenceSequence] = useState("");
 
   // Advanced section: detail tables, export, sample comparison, and the
   // legacy manual file-upload flow — collapsed by default so the primary
@@ -123,7 +124,11 @@ export default function SequencingAssist() {
     setPhase("pipeline_running");
     setPipelineError(null);
     try {
-      const result: PipelineResponse = await runPipeline(uploadResult.session_id);
+      const result: PipelineResponse = await runPipeline(
+        uploadResult.session_id,
+        false,
+        referenceSequence,
+      );
 
       // Map report
       setReport(result.report as unknown as BaseCallingReport);
@@ -211,11 +216,54 @@ export default function SequencingAssist() {
 
           {/* Phase 1: QC Preview + Run Pipeline button */}
           {uploadResult && phase !== "idle" && (
-            <QCPreview
-              data={uploadResult}
-              onRunPipeline={handleRunPipeline}
-              pipelineRunning={phase === "pipeline_running"}
-            />
+            <>
+              {/* Optional reference sequence — activates Step 6.6 in the algorithm */}
+              <Card
+                title="Reference sequence (optional)"
+                subtitle="Paste the known RNA sequence (5′→3′, A/U/G/C). When provided, the pipeline uses it to guide read extension and compares recovered reads against it — mismatches indicate candidate modifications. Leave blank to run without reference."
+              >
+                <textarea
+                  value={referenceSequence}
+                  onChange={(e) => setReferenceSequence(e.target.value)}
+                  placeholder="GCUACGGCCAUACCACCCU... (A/U/G/C or standard modification codes, T accepted as U)"
+                  rows={3}
+                  disabled={phase === "pipeline_running" || phase === "pipeline_complete"}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none disabled:bg-gray-50 disabled:text-gray-400"
+                />
+                {referenceSequence.trim() && (
+                  <p className="mt-1 text-xs text-gray-400">
+                    {referenceSequence.replace(/\s/g, "").length} characters entered.
+                    {phase === "pipeline_complete" && " Re-upload Excel to run with this reference."}
+                  </p>
+                )}
+              </Card>
+
+              <QCPreview
+                data={uploadResult}
+                onRunPipeline={handleRunPipeline}
+                pipelineRunning={phase === "pipeline_running"}
+              />
+            </>
+          )}
+
+          {/* Download Excel — available immediately after pipeline completes */}
+          {phase === "pipeline_complete" && uploadResult && (
+            <div className="flex items-center justify-between rounded-xl border border-green-200 bg-green-50 px-5 py-4">
+              <div>
+                <p className="text-sm font-semibold text-green-800">Pipeline complete — results ready</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Excel includes: candidate short reads with decoded nucleotide sequences, coverage
+                  analysis, annotated peak table{referenceSequence.trim() ? ", and reference comparison" : ""}.
+                </p>
+              </div>
+              <a
+                href={downloadResultsUrl(uploadResult.session_id)}
+                download
+                className="ml-4 shrink-0 rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 transition-colors"
+              >
+                Download Excel Results
+              </a>
+            </div>
           )}
 
           {pipelineError && (

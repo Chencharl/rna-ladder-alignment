@@ -701,7 +701,8 @@ PIPELINE_POINT_LIMIT = 8000  # Auto-subsample above this to keep pipeline fast
 @app.post("/sequencing-assist/run-pipeline")
 async def sequencing_assist_run_pipeline(
     session_id: str = Form(...),
-    subsample: bool = Form(False),  # Force subsample even if under limit
+    subsample: bool = Form(False),
+    reference_sequence: str = Form(""),   # optional reference RNA sequence (5′→3′)
 ) -> JSONResponse:
     """Run the nested ladder pipeline on a previously uploaded Excel file.
     Returns all dashboard-consumable output data inline as JSON.
@@ -728,10 +729,22 @@ async def sequencing_assist_run_pipeline(
     out_dir = session_dir / "output"
     out_dir.mkdir(exist_ok=True)
 
+    # Optional reference sequence — enables Step 6.6 (reference-guided extension
+    # and post-hoc comparison). Pass as-is; run_nested_pipeline normalises it.
+    ref_tokens: list[str] | None = None
+    if reference_sequence.strip():
+        # normalise_sequence_tokens strips whitespace, FASTA headers, T→U etc.
+        from backend.trna_constraints import normalise_sequence_tokens, default_residue_dictionary
+        try:
+            ref_tokens = normalise_sequence_tokens(reference_sequence.strip(), default_residue_dictionary())
+        except Exception:
+            ref_tokens = None  # invalid sequence — run without reference
+
     try:
         result = run_nested_pipeline(
             df=df,
             out_dir=str(out_dir),
+            reference=ref_tokens,
         )
     except Exception as exc:
         raise HTTPException(
@@ -837,6 +850,23 @@ async def sequencing_assist_run_pipeline(
                 "n_points": len(chain["indices"]),
             })
 
+    # Persist coverage bins and reference info so the download endpoint can read them
+    # without re-running the pipeline.
+    sidecar = {
+        "coverage_by_intensity": coverage_bins,
+        "reference_sequence": "".join(ref_tokens) if ref_tokens else None,
+        "n_pipeline_points": len(df),
+        "n_original_points": n_original,
+        "was_subsampled": was_subsampled,
+        "n_chains_total": len(chains_list),
+        "n_chains_min_10": n_chains_min_10,
+        "min_chain_len_shown": min_len_shown,
+    }
+    (out_dir / "_sidecar.json").write_text(json.dumps(sidecar))
+
+    # Reference comparison summary (if reference was provided)
+    reference_comparisons = _sanitize(report.get("reference_comparisons")) if ref_tokens else None
+
     response = {
         "report": _sanitize({
             k: v for k, v in report.items()
@@ -852,6 +882,7 @@ async def sequencing_assist_run_pipeline(
         "n_chains_min_10": n_chains_min_10,
         "min_chain_len_shown": min_len_shown,
         "coverage_by_intensity": coverage_bins,
+        "reference_comparisons": reference_comparisons,
         "sigmoid_post_pipeline": _sanitize(sigmoid_post_records),
         "was_subsampled": was_subsampled,
         "n_original_points": n_original,
@@ -859,3 +890,252 @@ async def sequencing_assist_run_pipeline(
     }
 
     return JSONResponse(content=response)
+
+
+# ---------------------------------------------------------------------------
+# Excel results download
+# ---------------------------------------------------------------------------
+
+# Nucleotide residue masses for sequence decoding (same as the algorithm's table)
+_RESIDUE_MASS: dict[str, float] = {
+    "A": 329.0525, "U": 306.0253, "G": 345.0474, "C": 305.0413,
+    "D": 308.0410, "Y": 306.0253, "m1A": 343.0682, "m5C": 319.0569,
+    "m7G": 359.0631, "m2G": 359.0631, "I": 330.0365,
+}
+_DECODE_TOL = 0.08  # Da — generous to handle calibration drift
+
+
+def _decode_sequence(masses: list[float]) -> str:
+    """Decode nucleotide identities from successive mass differences in a ladder chain."""
+    if len(masses) < 2:
+        return ""
+    sorted_m = sorted(masses)
+    calls: list[str] = []
+    for i in range(1, len(sorted_m)):
+        delta = sorted_m[i] - sorted_m[i - 1]
+        best_nt, best_diff = None, _DECODE_TOL
+        for nt, m in _RESIDUE_MASS.items():
+            if abs(delta - m) < best_diff:
+                best_diff = abs(delta - m)
+                best_nt = nt
+        calls.append(best_nt if best_nt else f"?{delta:.0f}")
+    return "-".join(calls)
+
+
+def _build_excel_response(session_dir: Path) -> bytes:
+    """Build a multi-sheet Excel workbook from a completed pipeline session."""
+    import io
+    from datetime import datetime
+    try:
+        import openpyxl
+        from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+    except ImportError:
+        raise HTTPException(500, "openpyxl not available")
+
+    out_dir = session_dir / "output"
+    if not out_dir.exists():
+        raise HTTPException(404, "Pipeline has not been run for this session.")
+
+    sidecar_path = out_dir / "_sidecar.json"
+    sidecar = json.loads(sidecar_path.read_text()) if sidecar_path.exists() else {}
+
+    def read_csv_safe(name: str):
+        p = out_dir / name
+        try:
+            return pd.read_csv(p) if p.exists() else None
+        except Exception:
+            return None
+
+    annotated   = read_csv_safe("annotated_data.csv")
+    peak_status = read_csv_safe("Peak_Status.csv")
+    read_summary = read_csv_safe("read_summary.csv")
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    # ── Styles ────────────────────────────────────────────────────────────
+    HDR_FILL  = PatternFill("solid", fgColor="1E3A5F")
+    HDR_FONT  = Font(bold=True, color="FFFFFF", size=11)
+    PRIME5_FILL  = PatternFill("solid", fgColor="DBEAFE")
+    PRIME3_FILL  = PatternFill("solid", fgColor="EDE9FE")
+    AMB_FILL     = PatternFill("solid", fgColor="FEF3C7")
+    CONF_FILL    = PatternFill("solid", fgColor="FEE2E2")
+    ALT_FILL     = PatternFill("solid", fgColor="F8FAFC")
+    thin = Side(style="thin", color="D1D5DB")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    def set_header(ws, cols):
+        for c, h in enumerate(cols, 1):
+            cell = ws.cell(row=1, column=c, value=h)
+            cell.fill = HDR_FILL; cell.font = HDR_FONT
+            cell.alignment = Alignment(horizontal="center", wrap_text=True)
+            cell.border = border
+        ws.row_dimensions[1].height = 30
+
+    def auto_width(ws, max_w=45):
+        for col in ws.columns:
+            w = max((len(str(c.value or "")) for c in col), default=8)
+            ws.column_dimensions[get_column_letter(col[0].column)].width = min(max(w+2, 10), max_w)
+
+    def row_fill(call):
+        if not call: return None
+        v = str(call).lower()
+        if "5" in v: return PRIME5_FILL
+        if "3" in v: return PRIME3_FILL
+        if "conflict" in v: return CONF_FILL
+        return AMB_FILL
+
+    # ── Sheet 1: Candidate Short Reads ───────────────────────────────────
+    ws1 = wb.create_sheet("Candidate Short Reads")
+    cols1 = ["Read #", "5′/3′ Call", "Confidence", "Length (nt)",
+             "Decoded Sequence (mass differences → nucleotides)",
+             "Mass Start (Da)", "Mass End (Da)", "RT Range (min)",
+             "Mean Rel_I", "Evidence (brief)", "Warnings"]
+    set_header(ws1, cols1)
+
+    min_len = int(sidecar.get("min_chain_len_shown", 10))
+    rows_written = 0
+
+    if peak_status is not None and read_summary is not None:
+        ps_with_rank = peak_status[peak_status["read_rank"].notna()].copy()
+        ps_with_rank["read_rank"] = ps_with_rank["read_rank"].astype(int)
+        mass_by_rank = {
+            int(rk): grp["mass"].tolist()
+            for rk, grp in ps_with_rank.groupby("read_rank")
+        }
+        for _, row in read_summary.iterrows():
+            rk = int(row.get("read_rank", 0) or 0)
+            call  = str(row.get("ladder_call", ""))
+            conf  = str(row.get("ladder_confidence_tier", ""))
+            length = int(row.get("read_length", 0) or 0)
+            if length < min_len:
+                continue
+            masses = sorted(mass_by_rank.get(rk, []))
+            seq   = _decode_sequence(masses)
+            m_s   = round(min(masses), 2) if masses else ""
+            m_e   = round(max(masses), 2) if masses else ""
+            rt_sub = ps_with_rank[ps_with_rank["read_rank"] == rk]["rt"].dropna()
+            rt_str = f"{rt_sub.min():.1f} – {rt_sub.max():.1f}" if len(rt_sub) else ""
+            mean_ri = round(float(row.get("mean_rel_i", 0) or 0), 4)
+            evid  = str(row.get("ladder_evidence", ""))[:150]
+            warn  = str(row.get("ladder_warnings", ""))[:150]
+            r = rows_written + 2
+            fill = row_fill(call)
+            for c, val in enumerate([rk, call, conf, length, seq, m_s, m_e, rt_str, mean_ri, evid, warn], 1):
+                cell = ws1.cell(row=r, column=c, value=val)
+                cell.border = border
+                cell.alignment = Alignment(wrap_text=(c in (5, 10, 11)))
+                if fill: cell.fill = fill
+                elif r % 2 == 0: cell.fill = ALT_FILL
+            rows_written += 1
+    ws1.freeze_panes = "A2"
+    auto_width(ws1)
+    ws1.column_dimensions["E"].width = 55
+
+    # ── Sheet 2: Coverage Analysis ────────────────────────────────────────
+    ws2 = wb.create_sheet("Coverage Analysis")
+    set_header(ws2, ["Intensity Bin", "Total Peaks", "Matched Peaks", "Coverage (%)"])
+    cov_bins = sidecar.get("coverage_by_intensity") or []
+    if not cov_bins and annotated is not None and "I" in annotated.columns:
+        n = len(annotated)
+        ann_s = annotated.sort_values("I", ascending=False).reset_index(drop=True)
+        used = {"primary_used","ambiguous_retained","conflict_retained","reference_reused"}
+        for lo, hi, label in [(0,.02,"Top 0–2%"),(.02,.05,"Top 2–5%"),(.05,.10,"Top 5–10%"),
+                               (.10,.20,"Top 10–20%"),(.20,.50,"Top 20–50%"),(.50,1.0,"Bottom 50%")]:
+            sub = ann_s.iloc[int(n*lo):int(n*hi)]
+            total = len(sub)
+            matched = int(sub["peak_status"].isin(used).sum()) if "peak_status" in sub.columns else 0
+            cov_bins.append({"label": label, "total": total, "matched": matched,
+                             "pct": round(matched/total*100,1) if total else 0})
+    for i, b in enumerate(cov_bins):
+        r = i + 2
+        clr = "D1FAE5" if b["pct"]>=80 else "FEF3C7" if b["pct"]>=50 else "FFEDD5" if b["pct"]>=20 else "FEE2E2"
+        for c, val in enumerate([b["label"], b["total"], b["matched"], f'{b["pct"]}%'], 1):
+            cell = ws2.cell(row=r, column=c, value=val)
+            cell.border = border
+            cell.fill = PatternFill("solid", fgColor=clr)
+    ws2.freeze_panes = "A2"; auto_width(ws2)
+
+    # ── Sheet 3: Annotated Peak Table ─────────────────────────────────────
+    if annotated is not None:
+        ws3 = wb.create_sheet("Annotated Peak Table")
+        display_cols = [c for c in ["M","I","T","block","Rel_I","peak_status"] if c in annotated.columns]
+        if peak_status is not None:
+            ps_mini = peak_status[["mass","read_rank","ladder_call"]].rename(columns={"mass":"M_ps"}).copy()
+            ann2 = annotated.sort_values("M")
+            ps_mini = ps_mini.sort_values("M_ps")
+            ann2 = pd.merge_asof(ann2, ps_mini, left_on="M", right_on="M_ps", tolerance=0.005, direction="nearest")
+            for col in ["read_rank","ladder_call"]:
+                if col in ann2.columns and col not in display_cols:
+                    display_cols.append(col)
+            annotated = ann2
+        labels = {"M":"Mass (Da)","I":"Sum Intensity","T":"Apex RT (min)","block":"Block",
+                  "Rel_I":"Rel_I","peak_status":"Status","read_rank":"Read #","ladder_call":"Call"}
+        set_header(ws3, [labels.get(c,c) for c in display_cols])
+        for ri, (_, row3) in enumerate(annotated[display_cols].head(5000).iterrows(), 2):
+            fill = row_fill(row3.get("ladder_call")) if not pd.isna(row3.get("read_rank", float("nan"))) else None
+            for ci, col in enumerate(display_cols, 1):
+                val = row3[col]
+                if pd.isna(val): val = ""
+                elif col in ("M","Rel_I"): val = round(float(val), 4)
+                elif col == "I": val = round(float(val), 1)
+                cell = ws3.cell(row=ri, column=ci, value=val)
+                cell.border = border
+                if fill: cell.fill = fill
+                elif ri % 2 == 0: cell.fill = ALT_FILL
+        ws3.freeze_panes = "A2"; auto_width(ws3)
+
+    # ── Sheet 4: Run Summary ──────────────────────────────────────────────
+    from datetime import datetime
+    ws4 = wb.create_sheet("Run Summary")
+    ws4.column_dimensions["A"].width = 38
+    ws4.column_dimensions["B"].width = 55
+    ws4.cell(row=1, column=1, value="RNA Ladder Sequencing Results").font = Font(bold=True, size=14)
+    ws4.cell(row=2, column=1, value=f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    ws4.append([])
+    def kv(ws, k, v):
+        r = ws.max_row + 1
+        c = ws.cell(row=r, column=1, value=k)
+        c.font = Font(bold=True); c.fill = PatternFill("solid", fgColor="F1F5F9")
+        ws.cell(row=r, column=2, value=str(v) if v is not None else "—")
+    kv(ws4, "Pipeline points processed", sidecar.get("n_pipeline_points","—"))
+    kv(ws4, "Original points (before any subsampling)", sidecar.get("n_original_points","—"))
+    kv(ws4, "Auto-subsampled during pipeline?", "Yes" if sidecar.get("was_subsampled") else "No")
+    kv(ws4, "Total chains recovered", sidecar.get("n_chains_total","—"))
+    kv(ws4, f"Chains with ≥{min_len} ladder positions (shown in plots)", sidecar.get("n_chains_min_10","—"))
+    if cov_bins:
+        tot = sum(b["total"] for b in cov_bins)
+        mat = sum(b["matched"] for b in cov_bins)
+        kv(ws4, "Overall peak coverage", f"{mat}/{tot} = {round(mat/tot*100,1)}%" if tot else "—")
+    ref = sidecar.get("reference_sequence")
+    kv(ws4, "Reference sequence provided", f"Yes ({len(ref)} nt): {ref[:40]}..." if ref and len(ref)>40 else (f"Yes: {ref}" if ref else "No"))
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+from fastapi.responses import StreamingResponse as _StreamingResponse
+import io as _io_module
+
+
+@app.get("/sequencing-assist/download-results/{session_id}")
+async def sequencing_assist_download_results(session_id: str):
+    """Return a multi-sheet Excel with candidate short reads, decoded nucleotide
+    sequences, coverage analysis, and annotated peak table. Call after run-pipeline."""
+    session_dir = _session_path(session_id)
+    try:
+        excel_bytes = _build_excel_response(session_dir)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to build Excel: {exc}") from exc
+
+    filename = f"rna_sequencing_results_{session_id[:8]}.xlsx"
+    return _StreamingResponse(
+        _io_module.BytesIO(excel_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

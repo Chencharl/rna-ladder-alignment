@@ -89,10 +89,15 @@ export async function uploadRawExcel(file: File): Promise<UploadRawResponse> {
   return res.json();
 }
 
-export async function runPipeline(sessionId: string, subsample = false): Promise<PipelineResponse> {
+export async function runPipeline(
+  sessionId: string,
+  subsample = false,
+  referenceSequence = "",
+): Promise<PipelineResponse> {
   const form = new FormData();
   form.append("session_id", sessionId);
   if (subsample) form.append("subsample", "true");
+  if (referenceSequence.trim()) form.append("reference_sequence", referenceSequence.trim());
   const res = await fetch(`${API_BASE}/sequencing-assist/run-pipeline`, {
     method: "POST",
     body: form,
@@ -102,4 +107,8 @@ export async function runPipeline(sessionId: string, subsample = false): Promise
     throw new Error(detail.detail || `Pipeline failed: ${res.status}`);
   }
   return res.json();
+}
+
+export function downloadResultsUrl(sessionId: string): string {
+  return `${API_BASE}/sequencing-assist/download-results/${sessionId}`;
 }
