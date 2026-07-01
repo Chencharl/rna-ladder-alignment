@@ -60,12 +60,16 @@ def _add_cors(response):
     return response
 
 
+# Vercel passes the full URL path as PATH_INFO (e.g. /api/sequencing-assist),
+# so register both the root and the full path to handle either mounting style.
 @app.route("/", methods=["OPTIONS"])
+@app.route("/api/sequencing-assist", methods=["OPTIONS"])
 def _preflight():
     return ("", 204)
 
 
 @app.route("/", methods=["POST"])
+@app.route("/api/sequencing-assist", methods=["POST"])
 def analyze():
     file = request.files.get("file")
     if file is None:
