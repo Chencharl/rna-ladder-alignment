@@ -12,5 +12,10 @@
         "includeFiles": ["trna_nested_algorithm.py"]
       }
     }
+  ],
+  "routes": [
+    { "src": "/api/sequencing-assist", "dest": "/api/sequencing-assist" },
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/frontend/$1" }
   ]
 }
