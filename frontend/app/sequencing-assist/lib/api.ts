@@ -1,4 +1,8 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// When NEXT_PUBLIC_API_URL is not set in the Vercel build environment, the
+// frontend calls the bundled Python function at /api/sequencing-assist instead
+// of a separate Railway backend.
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+export const IS_VERCEL_MODE = !process.env.NEXT_PUBLIC_API_URL;
 
 export interface ScatterPoint {
   M: number;
@@ -75,6 +79,11 @@ export interface CoverageBin {
   pct: number;
 }
 
+// Combined single-phase response returned by /api/sequencing-assist on Vercel.
+export interface AnalyzeResponse extends UploadRawResponse, PipelineResponse {
+  excel_b64?: string;
+}
+
 export async function uploadRawExcel(file: File): Promise<UploadRawResponse> {
   const form = new FormData();
   form.append("file", file);
@@ -105,6 +114,25 @@ export async function runPipeline(
   if (!res.ok) {
     const detail = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(detail.detail || `Pipeline failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+// Single-phase endpoint used on Vercel: upload + full pipeline in one request.
+export async function analyzeFile(
+  file: File,
+  referenceSequence = "",
+): Promise<AnalyzeResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  if (referenceSequence.trim()) form.append("reference_sequence", referenceSequence.trim());
+  const res = await fetch("/api/sequencing-assist", {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(detail.detail || `Analysis failed: ${res.status}`);
   }
   return res.json();
 }

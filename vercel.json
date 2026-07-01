@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/.next",
+  "installCommand": "cd frontend && npm install",
+  "framework": "nextjs",
+  "functions": {
+    "api/sequencing-assist.py": {
+      "runtime": "python3.12",
+      "maxDuration": 60,
+      "memory": 1024,
+      "includeFiles": "trna_nested_algorithm.py"
+    }
+  }
+}
