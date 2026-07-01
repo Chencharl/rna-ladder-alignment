@@ -1,21 +1,12 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "frontend/package.json",
-      "use": "@vercel/next"
-    },
-    {
-      "src": "api/sequencing-assist.py",
-      "use": "@vercel/python",
-      "config": {
-        "includeFiles": ["trna_nested_algorithm.py"]
-      }
+  "framework": "nextjs",
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/.next",
+  "functions": {
+    "api/sequencing-assist.py": {
+      "memory": 1024,
+      "includeFiles": "trna_nested_algorithm.py"
     }
-  ],
-  "routes": [
-    { "src": "/api/sequencing-assist", "dest": "/api/sequencing-assist" },
-    { "handle": "filesystem" },
-    { "src": "/(.*)", "dest": "/frontend/$1" }
-  ]
+  }
 }
