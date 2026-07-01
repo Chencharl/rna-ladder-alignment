@@ -21,11 +21,14 @@ import numpy as np
 import pandas as pd
 from flask import Flask, request, jsonify
 
-# Add repo root to sys.path so trna_nested_algorithm is importable.
-# __file__ = /var/task/api/sequencing-assist.py  →  parent = /var/task
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
+# Add the function's own directory and its parent to sys.path.
+# Vercel may place includeFiles alongside the function OR at the bundle root,
+# so we search both locations for trna_nested_algorithm.
+_FUNC_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.dirname(_FUNC_DIR)
+for _p in [_FUNC_DIR, _REPO_ROOT]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from trna_nested_algorithm import (  # noqa: E402
     load_data,
