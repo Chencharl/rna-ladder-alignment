@@ -225,10 +225,10 @@ export default function SequencingAssist() {
               RNA Ladder Sequencing Workbench
             </h1>
             <p className="mt-1 text-sm text-gray-500 max-w-2xl">
-              Upload a deconvoluted LC-MS Excel file. The Python backend computes
-              block-wise relative intensity (Dr. Jiang&apos;s nested algorithm), recovers
-              candidate short reads, and visualizes the sigmoidal RT-mass curve
-              with chain overlays and coverage analysis.
+              Upload a deconvoluted LC-MS Excel file. The pipeline computes
+              block-wise relative intensity across 320 Da mass windows, recovers
+              candidate short reads via nested ladder alignment, and visualizes
+              the sigmoidal RT-mass curve with chain overlays and coverage analysis.
             </p>
           </div>
           <Link
