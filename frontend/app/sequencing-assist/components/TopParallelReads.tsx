@@ -30,7 +30,7 @@ export function TopParallelReads({
       subtitle="Highest-ranked candidate short reads recovered by the nested ladder algorithm. Require manual verification against intact mass and branch evidence before use as primary sequencing evidence."
     >
       {groups.length === 0 ? (
-        <EmptyState>Upload top_parallel_reads_long.csv to see the top reads.</EmptyState>
+        <EmptyState>Run the analysis pipeline to see candidate short reads.</EmptyState>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {groups.map((g) => {
