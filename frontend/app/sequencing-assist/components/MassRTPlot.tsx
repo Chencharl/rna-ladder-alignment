@@ -7,20 +7,11 @@ import { Card, EmptyState } from "./ui";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
-const CALL_COLORS: Record<string, string> = {
-  "5'":      "#1a56db",
-  "3'":      "#7e3af2",
-  ambiguous: "#d97706",
-  conflict:  "#c81e1e",
-};
+// Top-4 candidate reads get visually distinct bold colors
+const TOP4_COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#a855f7"];
 
-function normalizeCall(raw: string): string {
-  const v = raw.toLowerCase();
-  if (v.includes("5")) return "5'";
-  if (v.includes("3")) return "3'";
-  if (v.includes("conflict")) return "conflict";
-  return "ambiguous";
-}
+// Unexplained high-intensity threshold (block-normalized Rel_I ≥ 0.5)
+const HIGH_INTENSITY_THRESH = 0.5;
 
 interface Props {
   points: SigmoidPoint[] | null;
@@ -30,44 +21,48 @@ interface Props {
 }
 
 export function MassRTPlot({ points, postPipeline, topChains, minChainLen = 10 }: Props) {
-  // ── Compute RT range from actual data for adaptive axis ───────────────────
   const rtStats = useMemo(() => {
     const src = postPipeline || points;
     if (!src || src.length === 0) return null;
     const rts = src.map((p) => p.T).filter((v) => Number.isFinite(v));
-    const min = Math.min(...rts);
-    const max = Math.max(...rts);
+    const sorted = [...rts].sort((a, b) => a - b);
+    const min = sorted[0];
+    const max = sorted[sorted.length - 1];
     const spread = max - min;
-    const p10 = [...rts].sort((a, b) => a - b)[Math.floor(rts.length * 0.1)];
-    const p90 = [...rts].sort((a, b) => a - b)[Math.floor(rts.length * 0.9)];
-    const iqr = p90 - p10;  // 80% interquartile range
-    return { min, max, spread, iqr, hasHighRT: max > 18 };
+    const p10 = sorted[Math.floor(rts.length * 0.1)];
+    const p90 = sorted[Math.floor(rts.length * 0.9)];
+    return { min, max, spread, iqr: p90 - p10, hasHighRT: max > 18 };
   }, [points, postPipeline]);
 
   const traces = useMemo(() => {
     const result: any[] = [];
-    const bgData = postPipeline || points;
-    if (!bgData || bgData.length === 0) return result;
 
-    if (postPipeline) {
-      const matched   = postPipeline.filter((p) => p.status !== "unused" && p.status !== "unknown");
-      const unmatched = postPipeline.filter((p) => p.status === "unused" || p.status === "unknown");
+    // ── Background scatter ────────────────────────────────────────────────
+    if (postPipeline && postPipeline.length > 0) {
+      const unmatched = postPipeline.filter(
+        (p) => p.status === "unused" || p.status === "unknown"
+      );
+      const matched = postPipeline.filter(
+        (p) => p.status !== "unused" && p.status !== "unknown"
+      );
+      const lowUnmatched = unmatched.filter((p) => p.Rel_I < HIGH_INTENSITY_THRESH);
+      const highUnmatched = unmatched.filter((p) => p.Rel_I >= HIGH_INTENSITY_THRESH);
 
-      if (unmatched.length > 0) {
+      if (lowUnmatched.length > 0) {
         result.push({
-          x: unmatched.map((p) => p.M),
-          y: unmatched.map((p) => p.T),
+          x: lowUnmatched.map((p) => p.M),
+          y: lowUnmatched.map((p) => p.T),
           mode: "markers",
-          type: unmatched.length > 5000 ? "scattergl" : "scatter",
-          name: "Unmatched",
-          legendgroup: "unmatched",
-          marker: { color: "#9ca3af", size: 3, opacity: 0.4 },
+          type: lowUnmatched.length > 5000 ? "scattergl" : "scatter",
+          name: "Unmatched (low intensity)",
+          marker: { color: "#9ca3af", size: 3, opacity: 0.35 },
           hoverinfo: "text",
-          text: unmatched.map((p) =>
+          text: lowUnmatched.map((p) =>
             `Mass: ${p.M.toFixed(2)}<br>RT: ${p.T.toFixed(2)}<br>Rel.I: ${p.Rel_I.toFixed(4)}`
           ),
         });
       }
+
       if (matched.length > 0) {
         result.push({
           x: matched.map((p) => p.M),
@@ -75,22 +70,44 @@ export function MassRTPlot({ points, postPipeline, topChains, minChainLen = 10 }
           mode: "markers",
           type: "scatter",
           name: "Matched",
-          legendgroup: "matched",
-          marker: { color: "#3b82f6", size: 5, opacity: 0.75 },
+          marker: { color: "#93c5fd", size: 4, opacity: 0.65 },
           hoverinfo: "text",
           text: matched.map((p) =>
-            `Mass: ${p.M.toFixed(2)}<br>RT: ${p.T.toFixed(2)}<br>Rel.I: ${p.Rel_I.toFixed(4)}<br>${p.status}`
+            `Mass: ${p.M.toFixed(2)}<br>RT: ${p.T.toFixed(2)}<br>Rel.I: ${p.Rel_I.toFixed(4)}`
           ),
         });
       }
-    } else if (points) {
+
+      // Orange diamonds = unexplained high-intensity peaks
+      if (highUnmatched.length > 0) {
+        result.push({
+          x: highUnmatched.map((p) => p.M),
+          y: highUnmatched.map((p) => p.T),
+          mode: "markers",
+          type: "scatter",
+          name: "Unexplained high-intensity",
+          marker: {
+            color: "#f97316",
+            size: 9,
+            opacity: 0.9,
+            symbol: "diamond",
+            line: { color: "#c2410c", width: 1.5 },
+          },
+          hoverinfo: "text",
+          text: highUnmatched.map((p) =>
+            `<b>Unexplained high-intensity</b><br>` +
+            `Mass: ${p.M.toFixed(2)}<br>RT: ${p.T.toFixed(2)}<br>` +
+            `Rel.I: ${p.Rel_I.toFixed(4)} ≥ ${HIGH_INTENSITY_THRESH} (unmatched)`
+          ),
+        });
+      }
+    } else if (points && points.length > 0) {
       result.push({
         x: points.map((p) => p.M),
         y: points.map((p) => p.T),
         mode: "markers",
         type: points.length > 5000 ? "scattergl" : "scatter",
         name: "All peaks",
-        legendgroup: "bg",
         marker: {
           color: points.map((p) => p.Rel_I),
           colorscale: "Viridis",
@@ -104,65 +121,58 @@ export function MassRTPlot({ points, postPipeline, topChains, minChainLen = 10 }
       });
     }
 
-    // ── Chain overlays (grouped legend same as scatter plot) ─────────────
+    // ── Chain overlays ────────────────────────────────────────────────────
     if (topChains && topChains.length > 0) {
       const byChain = new Map<number, ChainPoint[]>();
       for (const p of topChains) {
-        const list = byChain.get(p.chain_index) ?? [];
-        list.push(p);
-        byChain.set(p.chain_index, list);
+        const arr = byChain.get(p.chain_index) ?? [];
+        arr.push(p);
+        byChain.set(p.chain_index, arr);
       }
 
-      const typesPresent = new Set(
-        [...byChain.values()].map((pts) => normalizeCall(pts[0].ladder_type))
-      );
-      for (const callType of ["5'", "3'", "ambiguous", "conflict"]) {
-        if (!typesPresent.has(callType)) continue;
-        result.push({
-          x: [], y: [], mode: "lines+markers", type: "scatter",
-          name: callType, legendgroup: callType, showlegend: true,
-          line: { color: CALL_COLORS[callType], width: 2.5 },
-          marker: { color: CALL_COLORS[callType], size: 7 },
-        });
-      }
+      // Sort by chain_index; top 4 (rank 0–3) get bold colors
+      const sortedChains = [...byChain.entries()].sort((a, b) => a[0] - b[0]);
 
-      for (const [chainIdx, pts] of byChain) {
-        const sorted = pts.sort((a, b) => a.mass - b.mass);
-        const call = normalizeCall(sorted[0].ladder_type);
+      sortedChains.forEach(([chainIdx, pts], rank) => {
+        const sorted = [...pts].sort((a, b) => a.mass - b.mass);
         const n = sorted[0].n_points;
-        const color = CALL_COLORS[call] ?? "#666";
+        const isTop4 = rank < 4;
+        const color = isTop4 ? TOP4_COLORS[rank] : "#d1d5db";
+        const label = isTop4 ? `Read #${rank + 1} (${n} nt)` : `Chain #${chainIdx + 1}`;
+
         result.push({
           x: sorted.map((p) => p.mass),
           y: sorted.map((p) => p.rt),
           mode: "lines+markers",
           type: "scatter",
-          name: `#${chainIdx + 1} ${call}`,
-          legendgroup: call,
-          showlegend: false,
-          line: { color, width: 2.5 },
-          marker: { color, size: 7, line: { color: "#fff", width: 1 } },
+          name: label,
+          showlegend: isTop4,
+          line: { color, width: isTop4 ? 3 : 1.5 },
+          marker: {
+            color,
+            size: isTop4 ? 9 : 5,
+            ...(isTop4 ? { line: { color: "#fff", width: 1.5 } } : {}),
+          },
           hoverinfo: "text",
           text: sorted.map((p) =>
-            `<b>Chain #${chainIdx + 1} · ${call} · ${n} nt</b><br>` +
+            `<b>${label}</b><br>` +
             `Mass: ${p.mass.toFixed(2)} Da<br>` +
             `RT: ${p.rt.toFixed(2)} min<br>` +
             `Rel.I: ${p.rel_i.toFixed(4)}`
           ),
         });
-      }
+      });
     }
 
     return result;
   }, [points, postPipeline, topChains]);
 
-  // ── Artifact zone — only drawn when data actually reaches RT > 18 min ──
   const shapes = useMemo(() => {
     if (!rtStats?.hasHighRT) return [];
-    const yMax = Math.max(rtStats.max + 1, 25.5);
     return [{
       type: "rect",
       xref: "paper", x0: 0, x1: 1,
-      yref: "y", y0: 20, y1: yMax,
+      yref: "y", y0: 20, y1: Math.max(rtStats.max + 1, 25.5),
       fillcolor: "rgba(239,68,68,0.06)",
       line: { color: "rgba(239,68,68,0.3)", width: 1, dash: "dash" },
     }];
@@ -179,38 +189,36 @@ export function MassRTPlot({ points, postPipeline, topChains, minChainLen = 10 }
     }];
   }, [rtStats]);
 
-  // ── Adaptive y-axis: tight around data, not a fixed 0-25 ─────────────
   const yAxisRange = useMemo(() => {
     if (!rtStats) return [0, 25];
-    const lo = Math.max(0, rtStats.min - 1);
-    const hi = rtStats.hasHighRT
-      ? Math.max(rtStats.max + 1, 25.5)
-      : rtStats.max + Math.max(rtStats.spread * 0.08, 1);
-    return [lo, hi];
+    return [
+      Math.max(0, rtStats.min - 1),
+      rtStats.hasHighRT
+        ? Math.max(rtStats.max + 1, 25.5)
+        : rtStats.max + Math.max(rtStats.spread * 0.08, 1),
+    ];
   }, [rtStats]);
 
   const isFlat = rtStats != null && rtStats.iqr < 3;
-
   const hasData = (points && points.length > 0) || (postPipeline && postPipeline.length > 0);
 
-  // ── Subtitle reflects data quality ───────────────────────────────────
   const subtitle = isFlat
-    ? `RT spread: ${rtStats!.spread.toFixed(1)} min (compressed). This gradient does not separate fragments by length — the sigmoidal RT–mass curve requires a reversed-phase ion-pairing method. Colored lines = chains traced through RT space.`
-    : "The sigmoidal curve shows RT increasing with fragment mass. Colored lines = candidate short reads traced through RT space. Gray = unmatched peaks.";
+    ? `RT spread: ${rtStats!.spread.toFixed(1)} min (compressed). The sigmoidal shape requires a reversed-phase ion-pairing gradient. Top 4 reads = bold colored lines; orange diamonds = unexplained high-intensity unmatched peaks.`
+    : "RT increases with fragment mass (sigmoidal). Bold colored lines = top 4 candidate reads. Orange diamonds = unexplained high-intensity peaks (Rel_I ≥ 0.5, unmatched). Gray = low-intensity unmatched.";
 
   return (
     <Card title="Mass vs. Retention Time" subtitle={subtitle}>
       {isFlat && (
         <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
           <strong>Flat RT distribution detected.</strong> All fragments elute within a{" "}
-          {rtStats!.iqr.toFixed(1)} min window — the sigmoidal shape depends on a
-          length-dependent gradient. The scatter plot above still shows the Rel_I pattern correctly.
+          {rtStats!.iqr.toFixed(1)} min window — the sigmoidal separation requires a
+          length-dependent gradient. The Rel_I scatter plot still reflects signal intensity correctly.
         </div>
       )}
       {!hasData ? (
         <EmptyState>Upload data to see the RT–mass curve.</EmptyState>
       ) : (
-        <div className="w-full" style={{ height: 500 }}>
+        <div className="w-full" style={{ height: 520 }}>
           <Plot
             data={traces}
             layout={{
@@ -229,7 +237,7 @@ export function MassRTPlot({ points, postPipeline, topChains, minChainLen = 10 }
               paper_bgcolor: "transparent",
               legend: {
                 orientation: "h" as const,
-                y: 1.12, x: 0.5, xanchor: "center" as const,
+                y: 1.14, x: 0.5, xanchor: "center" as const,
                 font: { size: 12 },
                 bgcolor: "rgba(255,255,255,0.85)",
                 bordercolor: "#e5e7eb", borderwidth: 1,

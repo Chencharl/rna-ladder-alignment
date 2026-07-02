@@ -2,18 +2,11 @@
 
 import Link from "next/link";
 import { useState, useCallback } from "react";
-import { ClassificationDetail } from "./components/ClassificationDetail";
-import { ComparePlot } from "./components/ComparePlot";
 import { CoverageByIntensity } from "./components/CoverageByIntensity";
-import { DecisionTable } from "./components/DecisionTable";
 import { ExcelUploader } from "./components/ExcelUploader";
-import { ExportPanel } from "./components/ExportPanel";
-import { FileUploader } from "./components/FileUploader";
 import { MassRTPlot } from "./components/MassRTPlot";
 import { PeakScatterPlot } from "./components/PeakScatterPlot";
-import { PeakStatusTable } from "./components/PeakStatusTable";
 import { QCPreview } from "./components/QCPreview";
-import { RunOverview } from "./components/RunOverview";
 import { TopParallelReads } from "./components/TopParallelReads";
 import { Card } from "./components/ui";
 import type {
@@ -24,54 +17,16 @@ import type {
   CoverageBin,
   SigmoidPostPoint,
 } from "./lib/api";
-import { runPipeline, downloadResultsUrl, analyzeFile, IS_VERCEL_MODE } from "./lib/api";
-import { loadFilesIntoRun } from "./lib/parse";
+import { runPipeline, downloadResultsUrl, IS_VERCEL_MODE } from "./lib/api";
 import type {
   BaseCallingReport,
   TopParallelRow,
   DecisionRow,
   ClassificationEvidenceRow,
   PeakStatusRow,
-  LoadedRun,
 } from "./lib/types";
-import { EMPTY_RUN } from "./lib/types";
 
 type Phase = "idle" | "excel_loaded" | "pipeline_running" | "pipeline_complete";
-
-function CompareSection({ sessionId, primaryScatter }: { sessionId: string | null; primaryScatter: import("./lib/api").ScatterPoint[] | null }) {
-  const [show, setShow] = useState(false);
-  const [compareUpload, setCompareUpload] = useState<UploadRawResponse | null>(null);
-  const [compareName, setCompareName] = useState("");
-
-  if (!primaryScatter) return null;
-
-  return (
-    <div className="border-t border-gray-200 pt-4">
-      <button
-        type="button"
-        onClick={() => setShow(!show)}
-        className="text-sm font-medium text-blue-600 hover:text-blue-800"
-      >
-        {show ? "Hide" : "Compare with a second sample"} (e.g. HEK vs HepG2)
-      </button>
-      {show && (
-        <div className="mt-4 space-y-4">
-          <Card title="Load second sample" subtitle="Upload a second deconvoluted Excel file to overlay on the scatter and sigmoid plots.">
-            <ExcelUploader onUploaded={(r) => { setCompareUpload(r); setCompareName(r.filename.replace(/\.xlsx?$/i, "")); }} />
-          </Card>
-          {compareUpload && primaryScatter && (
-            <ComparePlot
-              label1="Sample 1"
-              label2={compareName || "Sample 2"}
-              scatter1={primaryScatter}
-              scatter2={compareUpload.scatter_points}
-            />
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 export default function SequencingAssist() {
   const [phase, setPhase] = useState<Phase>("idle");
@@ -95,15 +50,8 @@ export default function SequencingAssist() {
   const [selectedReadRank, setSelectedReadRank] = useState<number | null>(null);
   const [referenceSequence, setReferenceSequence] = useState("");
 
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [advancedRun, setAdvancedRun] = useState<LoadedRun>(EMPTY_RUN);
-  const [advancedUnmatched, setAdvancedUnmatched] = useState<string[]>([]);
-  const [advancedLoading, setAdvancedLoading] = useState(false);
-  const [advancedError, setAdvancedError] = useState<string | null>(null);
-
   const selectReadAndExpand = useCallback((rank: number) => {
     setSelectedReadRank(rank);
-    setShowAdvanced(true);
   }, []);
 
   function resetPipelineState() {
@@ -184,26 +132,6 @@ export default function SequencingAssist() {
       setPhase("excel_loaded");
     }
   }, [uploadResult, referenceSequence]);
-
-  async function handleAdvancedFiles(files: File[]) {
-    setAdvancedLoading(true);
-    setAdvancedError(null);
-    try {
-      const { run: updated, unmatched } = await loadFilesIntoRun(files, advancedRun);
-      setAdvancedRun(updated);
-      setAdvancedUnmatched(unmatched);
-      if (updated.report) setReport(updated.report);
-      if (updated.topParallel) setTopParallel(updated.topParallel);
-      if (updated.decisions) setDecisions(updated.decisions);
-      if (updated.classificationEvidence) setClassificationEvidence(updated.classificationEvidence);
-      if (updated.peakStatus) setPeakStatus(updated.peakStatus);
-      setPhase("pipeline_complete");
-    } catch (err) {
-      setAdvancedError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setAdvancedLoading(false);
-    }
-  }
 
   const hasResults = report || topParallel || decisions;
 
@@ -398,56 +326,6 @@ export default function SequencingAssist() {
             </>
           )}
 
-          {/* Advanced: detail tables, export, sample comparison, legacy upload */}
-          <div className="border-t border-gray-200 pt-4">
-            <button
-              type="button"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="text-sm font-medium text-gray-500 hover:text-gray-700"
-            >
-              {showAdvanced ? "Hide advanced" : "Show advanced: evidence detail, export, compare samples"}
-            </button>
-
-            {showAdvanced && (
-              <div className="mt-4 space-y-6">
-                {hasResults && (
-                  <>
-                    <RunOverview report={report} />
-
-                    <ClassificationDetail
-                      selectedReadRank={selectedReadRank}
-                      classificationEvidence={classificationEvidence}
-                      decisions={decisions}
-                    />
-
-                    <DecisionTable
-                      decisions={decisions}
-                      topParallel={topParallel}
-                      selectedReadRank={selectedReadRank}
-                      onSelectRead={setSelectedReadRank}
-                    />
-
-                    <PeakStatusTable rows={peakStatus} onSelectRead={setSelectedReadRank} />
-
-                    <ExportPanel run={advancedRun} />
-                  </>
-                )}
-
-                {phase === "pipeline_complete" && (
-                  <CompareSection sessionId={uploadResult?.session_id ?? null} primaryScatter={uploadResult?.scatter_points ?? null} />
-                )}
-
-                <Card
-                  title="Load pipeline output files"
-                  subtitle="If you already have output files from trna_nested_algorithm.py, upload them here."
-                >
-                  <FileUploader run={advancedRun} onFiles={handleAdvancedFiles} unmatched={advancedUnmatched} />
-                  {advancedLoading && <p className="mt-3 text-sm text-gray-400 animate-pulse">Reading files...</p>}
-                  {advancedError && <p className="mt-3 text-sm text-red-600">{advancedError}</p>}
-                </Card>
-              </div>
-            )}
-          </div>
         </div>
       </div>
     </main>
