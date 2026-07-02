@@ -76,6 +76,15 @@ def analyze():
         return jsonify({"detail": "No file provided"}), 400
 
     ref_seq = request.form.get("reference_sequence", "").strip()
+    # User-adjustable pipeline parameters
+    try:
+        min_chain_len_param = max(3, min(int(request.form.get("min_chain_len", "10") or "10"), 50))
+    except (ValueError, TypeError):
+        min_chain_len_param = 10
+    try:
+        top_n_chains_param = max(4, min(int(request.form.get("top_n_chains", "10") or "10"), 25))
+    except (ValueError, TypeError):
+        top_n_chains_param = 10
     fname = file.filename or "upload.xlsx"
     if not fname.lower().endswith((".xlsx", ".xls")):
         return jsonify({"detail": "Expected an Excel (.xlsx) file"}), 400
@@ -156,15 +165,15 @@ def analyze():
 
         # ── 8. Chain overlay data ─────────────────────────────────────────
         n_chains_total = len(chains_list)
-        n_chains_min_10 = sum(1 for c in chains_list if len(c["indices"]) >= 10)
-        min_len = 10 if n_chains_min_10 > 0 else 3
+        n_chains_min_10 = sum(1 for c in chains_list if len(c["indices"]) >= min_chain_len_param)
+        min_len = min_chain_len_param
 
         top_chains = []
         for chain_idx, chain in sorted(
             enumerate(chains_list),
             key=lambda x: len(x[1]["indices"]),
             reverse=True,
-        )[:10]:
+        )[:top_n_chains_param]:
             if len(chain["indices"]) < min_len:
                 continue
             rows = data_df.loc[chain["indices"]].sort_values("M")

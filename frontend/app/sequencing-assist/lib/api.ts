@@ -118,14 +118,22 @@ export async function runPipeline(
   return res.json();
 }
 
+export interface PipelineParams {
+  minChainLen?: number;  // minimum ladder positions for a chain to be reported (default 10)
+  topNChains?: number;   // number of top chains to include in plot data (default 10)
+}
+
 // Single-phase endpoint used on Vercel: upload + full pipeline in one request.
 export async function analyzeFile(
   file: File,
   referenceSequence = "",
+  params: PipelineParams = {},
 ): Promise<AnalyzeResponse> {
   const form = new FormData();
   form.append("file", file);
   if (referenceSequence.trim()) form.append("reference_sequence", referenceSequence.trim());
+  if (params.minChainLen != null) form.append("min_chain_len", String(params.minChainLen));
+  if (params.topNChains != null) form.append("top_n_chains", String(params.topNChains));
   const res = await fetch("/api/sequencing-assist", {
     method: "POST",
     body: form,
