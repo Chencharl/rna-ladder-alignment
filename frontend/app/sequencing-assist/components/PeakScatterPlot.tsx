@@ -59,15 +59,20 @@ export function PeakScatterPlot({
         byChain.set(p.chain_index, arr);
       }
 
-      // Sort by chain_index; lower index = higher rank from backend
-      const sortedChains = [...byChain.entries()].sort((a, b) => a[0] - b[0]);
+      // Sort by read_rank (algorithm intensity rank); lower = higher priority
+      const sortedChains = [...byChain.values()].sort(
+        (a, b) => (a[0]?.read_rank ?? Infinity) - (b[0]?.read_rank ?? Infinity)
+      );
 
-      sortedChains.forEach(([, pts], rank) => {
+      sortedChains.forEach((pts, idx) => {
         const sorted = [...pts].sort((a, b) => a.mass - b.mass);
         const n = sorted[0].n_points;
-        const isTop4 = rank < 4;
-        const color = isTop4 ? TOP4_COLORS[rank] : "#d1d5db";
-        const label = isTop4 ? `Read #${rank + 1} (${n} nt)` : "";
+        const readRank = sorted[0].read_rank ?? (idx + 1);
+        const isTop4 = idx < 4;
+        const isSelected = selectedReadRank != null && readRank === selectedReadRank;
+        const baseColor = isTop4 ? TOP4_COLORS[idx] : "#d1d5db";
+        const color = isSelected ? "#f59e0b" : baseColor;
+        const label = isTop4 ? `Read #${readRank} (${n} nt)` : "";
 
         result.push({
           x: sorted.map((p) => p.mass),
@@ -76,15 +81,15 @@ export function PeakScatterPlot({
           type: "scatter",
           name: label,
           showlegend: isTop4,
-          line: { color, width: isTop4 ? 3 : 1.5 },
+          line: { color, width: isSelected ? 4 : (isTop4 ? 3 : 1.5) },
           marker: {
             color,
-            size: isTop4 ? 8 : 4,
-            ...(isTop4 ? { line: { color: "#fff", width: 1.5 } } : {}),
+            size: isSelected ? 11 : (isTop4 ? 8 : 4),
+            ...((isTop4 || isSelected) ? { line: { color: "#fff", width: 1.5 } } : {}),
           },
-          hoverinfo: isTop4 ? "text" : "skip",
-          text: isTop4 ? sorted.map((p) =>
-            `<b>Read #${rank + 1} · ${n} nt</b><br>Mass: ${p.mass.toFixed(2)} Da<br>Rel.I: ${p.rel_i.toFixed(4)}<br>RT: ${p.rt.toFixed(2)} min`
+          hoverinfo: (isTop4 || isSelected) ? "text" : "skip",
+          text: (isTop4 || isSelected) ? sorted.map((p) =>
+            `<b>Read #${readRank} · ${n} nt</b><br>Mass: ${p.mass.toFixed(2)} Da<br>Rel.I: ${p.rel_i.toFixed(4)}<br>RT: ${p.rt.toFixed(2)} min`
           ) : [],
         });
       });

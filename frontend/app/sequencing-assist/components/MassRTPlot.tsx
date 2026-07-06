@@ -18,9 +18,10 @@ interface Props {
   postPipeline: SigmoidPostPoint[] | null;
   topChains: ChainPoint[] | null;
   minChainLen?: number;
+  selectedReadRank?: number | null;
 }
 
-export function MassRTPlot({ points, postPipeline, topChains, minChainLen = 10 }: Props) {
+export function MassRTPlot({ points, postPipeline, topChains, minChainLen = 10, selectedReadRank }: Props) {
   const rtStats = useMemo(() => {
     const src = postPipeline || points;
     if (!src || src.length === 0) return null;
@@ -130,15 +131,20 @@ export function MassRTPlot({ points, postPipeline, topChains, minChainLen = 10 }
         byChain.set(p.chain_index, arr);
       }
 
-      // Sort by chain_index; top 4 (rank 0–3) get bold colors
-      const sortedChains = [...byChain.entries()].sort((a, b) => a[0] - b[0]);
+      // Sort by read_rank (algorithm intensity rank); lower = higher priority
+      const sortedChains = [...byChain.values()].sort(
+        (a, b) => (a[0]?.read_rank ?? Infinity) - (b[0]?.read_rank ?? Infinity)
+      );
 
-      sortedChains.forEach(([chainIdx, pts], rank) => {
+      sortedChains.forEach((pts, idx) => {
         const sorted = [...pts].sort((a, b) => a.mass - b.mass);
         const n = sorted[0].n_points;
-        const isTop4 = rank < 4;
-        const color = isTop4 ? TOP4_COLORS[rank] : "#d1d5db";
-        const label = isTop4 ? `Read #${rank + 1} (${n} nt)` : `Chain #${chainIdx + 1}`;
+        const readRank = sorted[0].read_rank ?? (idx + 1);
+        const isTop4 = idx < 4;
+        const isSelected = selectedReadRank != null && readRank === selectedReadRank;
+        const baseColor = isTop4 ? TOP4_COLORS[idx] : "#d1d5db";
+        const color = isSelected ? "#f59e0b" : baseColor;
+        const label = isTop4 ? `Read #${readRank} (${n} nt)` : "";
 
         result.push({
           x: sorted.map((p) => p.mass),
@@ -147,15 +153,15 @@ export function MassRTPlot({ points, postPipeline, topChains, minChainLen = 10 }
           type: "scatter",
           name: label,
           showlegend: isTop4,
-          line: { color, width: isTop4 ? 3 : 1.5 },
+          line: { color, width: isSelected ? 4 : (isTop4 ? 3 : 1.5) },
           marker: {
             color,
-            size: isTop4 ? 9 : 5,
-            ...(isTop4 ? { line: { color: "#fff", width: 1.5 } } : {}),
+            size: isSelected ? 11 : (isTop4 ? 9 : 5),
+            ...((isTop4 || isSelected) ? { line: { color: "#fff", width: 1.5 } } : {}),
           },
           hoverinfo: "text",
           text: sorted.map((p) =>
-            `<b>${label}</b><br>` +
+            `<b>Read #${readRank}${isTop4 ? ` · ${n} nt` : ""}</b><br>` +
             `Mass: ${p.mass.toFixed(2)} Da<br>` +
             `RT: ${p.rt.toFixed(2)} min<br>` +
             `Rel.I: ${p.rel_i.toFixed(4)}`
@@ -165,7 +171,7 @@ export function MassRTPlot({ points, postPipeline, topChains, minChainLen = 10 }
     }
 
     return result;
-  }, [points, postPipeline, topChains]);
+  }, [points, postPipeline, topChains, selectedReadRank]);
 
   const shapes = useMemo(() => {
     if (!rtStats?.hasHighRT) return [];

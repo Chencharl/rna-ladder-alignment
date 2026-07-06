@@ -15,6 +15,7 @@ import type {
   AnalyzeResponse,
   ChainPoint,
   CoverageBin,
+  CoverageByMassRange,
   SigmoidPostPoint,
   PipelineParams,
 } from "./lib/api";
@@ -40,6 +41,7 @@ export default function SequencingAssist() {
   const [pipelineParams, setPipelineParams] = useState<PipelineParams>({
     minChainLen: 10,
     topNChains: 10,
+    minRelI: 5,
   });
 
   // Pipeline output
@@ -50,6 +52,7 @@ export default function SequencingAssist() {
   const [peakStatus, setPeakStatus] = useState<PeakStatusRow[] | null>(null);
   const [topChainsForPlot, setTopChainsForPlot] = useState<ChainPoint[] | null>(null);
   const [coverageBins, setCoverageBins] = useState<CoverageBin[] | null>(null);
+  const [coverageMassRange, setCoverageMassRange] = useState<CoverageByMassRange[] | null>(null);
   const [sigmoidPost, setSigmoidPost] = useState<SigmoidPostPoint[] | null>(null);
   const [pipelineMeta, setPipelineMeta] = useState<{
     subsampled: boolean; nOriginal: number; nPipeline: number;
@@ -69,6 +72,7 @@ export default function SequencingAssist() {
     setPeakStatus(null);
     setTopChainsForPlot(null);
     setCoverageBins(null);
+    setCoverageMassRange(null);
     setSigmoidPost(null);
     setPipelineMeta(null);
     setSelectedReadRank(null);
@@ -84,6 +88,7 @@ export default function SequencingAssist() {
     setPeakStatus(result.peak_status as unknown as PeakStatusRow[] | null);
     setTopChainsForPlot(result.top_chains_for_plot ?? null);
     setCoverageBins(result.coverage_by_intensity ?? null);
+    setCoverageMassRange(result.coverage_by_mass_range ?? null);
     setSigmoidPost(result.sigmoid_post_pipeline ?? null);
     setPipelineMeta({
       subsampled: result.was_subsampled,
@@ -263,6 +268,31 @@ export default function SequencingAssist() {
                           className="w-24 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-gray-50"
                         />
                       </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Signal threshold (% of block max)
+                        </label>
+                        <p className="text-xs text-gray-400 mb-2">
+                          Only peaks with relative intensity ≥ this value are used as chain seeds.
+                          5% removes low-signal noise while retaining all meaningful peaks.
+                          Set to 0 to use all peaks.
+                        </p>
+                        <input
+                          type="number"
+                          min={0}
+                          max={20}
+                          step={1}
+                          value={pipelineParams.minRelI ?? 5}
+                          disabled={isRunning}
+                          onChange={(e) =>
+                            setPipelineParams((p) => ({
+                              ...p,
+                              minRelI: Math.max(0, Math.min(20, Number(e.target.value) || 0)),
+                            }))
+                          }
+                          className="w-24 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-gray-50"
+                        />
+                      </div>
                     </div>
                   </Card>
 
@@ -391,6 +421,24 @@ export default function SequencingAssist() {
             </div>
           )}
 
+          {uploadResult?.data_type_warning?.likely_intact && (
+            <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+              <strong>Data type warning — results may not be valid.</strong> This file appears
+              to contain intact RNA mass data (mass range{" "}
+              {uploadResult.mass_range[0].toLocaleString()}–
+              {uploadResult.mass_range[1].toLocaleString()} Da). The ladder algorithm requires
+              hydrolysis ladder data (2,000–23,000 Da). The pipeline has been restricted to the
+              2,000–23,000 Da region; peaks outside that range are excluded from chain recovery.
+              {uploadResult.data_type_warning.reasons.length > 0 && (
+                <ul className="mt-1.5 ml-4 list-disc space-y-0.5 text-xs text-red-700">
+                  {uploadResult.data_type_warning.reasons.map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           {/* Download banner */}
           {phase === "pipeline_complete" && (
             <div className="flex items-center justify-between rounded-xl border border-green-200 bg-green-50 px-5 py-4">
@@ -448,13 +496,14 @@ export default function SequencingAssist() {
               postPipeline={sigmoidPost}
               topChains={topChainsForPlot}
               minChainLen={pipelineMeta?.minChainLenShown}
+              selectedReadRank={selectedReadRank}
             />
           )}
 
           {/* Core views 3 + 4 — coverage + candidate reads table */}
           {hasResults && (
             <>
-              <CoverageByIntensity bins={coverageBins} />
+              <CoverageByIntensity bins={coverageBins} byMassRange={coverageMassRange} />
               <TopParallelReads
                 rows={topParallel}
                 selectedReadRank={selectedReadRank}

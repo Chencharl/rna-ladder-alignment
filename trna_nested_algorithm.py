@@ -69,23 +69,45 @@ import matplotlib.pyplot as plt
 # ---------------------------------------------------------------------------
 
 CANONICAL_RNA_RESIDUE_MASS: Dict[str, float] = {
-    "A": 329.0525,
-    "C": 305.0413,
-    "G": 345.0474,
-    "U": 306.0253,
+    "A": 329.05252,
+    "C": 305.04129,
+    "G": 345.04743,
+    "U": 306.02530,
 }
 
-# A few common tRNA modifications, given as illustrative starting points.
-# Real modification sets are organism/sample specific -- edit freely.
+# Common RNA modifications. Masses from the project modification dictionary.
+# Ψ (pseudouridine) is omitted — isobaric with U, adds no new chain connections.
+# Isobaric pairs share one entry (the algorithm picks whichever fits best within
+# mass_tol; both are captured in the display decode step in the API layer).
 COMMON_MODIFIED_RESIDUE_MASS: Dict[str, float] = {
-    "Y":    306.0253,   # pseudouridine - isobaric with U
-    "D":    308.0410,   # dihydrouridine (U + 2H)
-    "m1A":  343.0682,   # 1-methyladenosine (A + CH2)
-    "m5C":  319.0569,   # 5-methylcytidine (C + CH2)
-    "m7G":  359.0631,   # 7-methylguanosine (G + CH2)
-    "m2G":  359.0631,   # N2-methylguanosine (isobaric with m7G)
-    "I":    330.0365,   # inosine (A, deaminated)
-    "ac4C": 347.0518,   # N4-acetylcytidine (C + C2H2O)
+    # ── Uridine modifications ──────────────────────────────────────────────────
+    "D":        308.04095,  # dihydrouridine (U + 2H); tRNA D-loop
+    "Um":       320.04095,  # 2'-O-methyluridine / m1Ψ (U + CH2); common in rRNA
+    "s2U":      322.00246,  # 2-thiouridine / 4-thiouridine (U + S–O); wobble pos. 34
+    "f5C":      333.03620,  # 5-formylcytidine — placed here by mass (C+CO)
+    "mo5U":     336.03587,  # 5-methoxyuridine
+    "mnm5U":    349.06750,  # 5-methylaminomethyluridine; wobble pos. 34
+    "ncm5U":    363.04677,  # 5-carbamoylmethyluridine
+    "mnm5s2U":  365.04466,  # 5-methylaminomethyl-2-thiouridine; wobble pos. 34
+    "mcm5U":    378.04643,  # 5-methoxycarbonylmethyluridine; human tRNA Leu/Ser/Trp wobble
+    "cmo5U":    380.02570,  # uridine 5-oxyacetic acid
+    "mcm5s2U":  394.02359,  # 5-methoxycarbonylmethyl-2-thiouridine; tRNA Lys/Gln/Glu
+    # ── Cytidine modifications ─────────────────────────────────────────────────
+    "s2C":      321.01844,  # 2-thiocytidine
+    "m5C":      319.05694,  # 5-methylcytidine / 2'-O-methylcytidine (C + CH2)
+    "ac4C":     347.05185,  # N4-acetylcytidine / 5-formyl-2'-O-methylcytidine (C + C2H2O)
+    "k2C":      433.13625,  # lysidine (agmatidine-related); tRNA Ile2
+    # ── Adenosine modifications ────────────────────────────────────────────────
+    "I":        330.03654,  # inosine (A → I by deamination); wobble pos. 34
+    "m1A":      343.06817,  # 1-methyladenosine / 2'-O-methyladenosine (A + CH2)
+    "i6A":      397.11512,  # N6-isopentenyladenosine; tRNA pos. 37 (class II)
+    "io6A":     413.11003,  # N6-(cis-hydroxyisopentenyl)adenosine
+    "t6A":      474.09003,  # N6-threonylcarbamoyladenosine; tRNA pos. 37 (nearly universal)
+    # ── Guanosine modifications ────────────────────────────────────────────────
+    "m7G":      359.06308,  # 7-methylguanosine / N2-methylguanosine / 2'-O-methylguanosine (G+CH2)
+    "m22G":     373.07873,  # N2,N2-dimethylguanosine; tRNA pos. 26
+    "m22Gm":    387.09438,  # N2,N2,2'-O-trimethylguanosine; tRNA m7G cap-related
+    "Q":        471.11551,  # queuosine; eukaryotic tRNA pos. 34
 }
 
 DEFAULT_ALLOWED_MASSES: Dict[str, float] = {

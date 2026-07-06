@@ -35,6 +35,7 @@ from trna_nested_algorithm import (  # noqa: E402
     assign_blocks,
     compute_relative_intensity,
     run_pipeline as _run_nested_pipeline,
+    Config as _AlgoConfig,
     BLOCK_WIDTH_DA,
     N_BLOCKS,
 )
@@ -43,10 +44,65 @@ from trna_nested_algorithm import (  # noqa: E402
 PRE_SUB_LIMIT = 20_000
 PIPELINE_POINT_LIMIT = 8_000
 
-_RESIDUE_MASS = {
-    "A": 329.0525, "U": 306.0253, "G": 345.0474, "C": 305.0413,
+# Full modification dictionary (from project reference, dictonary.csv).
+# Isobaric pairs are merged under the most biologically common label; the
+# decode step picks the closest mass match so both are effectively covered.
+_RESIDUE_MASS: dict[str, float] = {
+    # Canonical bases
+    "A":          329.05252,
+    "U":          306.02530,
+    "G":          345.04743,
+    "C":          305.04129,
+    # Uridine modifications
+    "D":          308.04095,  # dihydrouridine
+    "Um/m1Ψ":     320.04095,  # 2'-O-methyluridine / 1-methylpseudouridine / Ψm / mU
+    "s2U/s4U":    322.00246,  # 2-thiouridine / 4-thiouridine
+    "mo5U":       336.03587,  # 5-methoxyuridine
+    "m5s2U":      336.01811,  # 5-methyl-2-thiouridine
+    "m5Um":       334.05660,  # 5,2'-O-dimethyluridine
+    "mnm5U":      349.06750,  # 5-methylaminomethyluridine
+    "ncm5U":      363.04677,  # 5-carbamoylmethyluridine
+    "mnm5s2U":    365.04466,  # 5-methylaminomethyl-2-thiouridine
+    "mcm5U":      378.04643,  # 5-methoxycarbonylmethyluridine
+    "cmo5U":      380.02570,  # uridine 5-oxyacetic acid
+    "cmnm5U":     393.05733,  # 5-carboxymethylaminomethyluridine
+    "mcm5s2U":    394.02359,  # 5-methoxycarbonylmethyl-2-thiouridine
+    "mchm5U":     394.04135,  # 5-(carboxyhydroxymethyl)uridine methyl ester
+    "ncm5Um":     377.06242,  # 5-carbamoylmethyl-2'-O-methyluridine
+    "acp3U":      407.07298,  # 3-(3-amino-3-carboxypropyl)uridine
+    "cmnm5s2U":   409.03449,  # 5-carboxymethylaminomethyl-2-thiouridine
+    "tm5U":       443.04000,  # 5-taurinomethyluridine
+    "tm5s2U":     459.01710,  # 5-taurinomethyl-2-thiouridine
+    "X(acp3U)":   407.07298,  # (same mass as acp3U — resolved to closest)
+    # Cytidine modifications
+    "s2C":        321.01844,  # 2-thiocytidine
+    "m5C/Cm":     319.05694,  # 5-methylcytidine / 2'-O-methylcytidine
+    "ac4C":       347.05185,  # N4-acetylcytidine / 5-formyl-2'-O-methylcytidine
+    "f5C":        333.03620,  # 5-formylcytidine
+    "k2C":        433.13625,  # lysidine
+    # Adenosine modifications
+    "I":          330.03654,  # inosine
+    "m1I":        344.05200,  # 1-methylinosine
+    "mA/Am":      343.06817,  # N6-methyladenosine / 2'-O-methyladenosine
+    "i6A":        397.11512,  # N6-isopentenyladenosine
+    "io6A":       413.11003,  # N6-(cis-hydroxyisopentenyl)adenosine
+    "ms2i6A":     443.10284,  # 2-methylthio-N6-isopentenyladenosine
+    "t6A":        474.09003,  # N6-threonylcarbamoyladenosine
+    "m6t6A":      488.10568,  # N6-methyl-N6-threonylcarbamoyladenosine
+    "ms2t6A":     520.07775,  # 2-methylthio-N6-threonylcarbamoyladenosine
+    "Ar(p)":      541.06111,  # 2'-O-ribosyladenosine (phosphate)
+    "yW":         212.01060,  # wybutosine (see dictionary; verify mass for your context)
+    "o2yW":       602.13737,  # peroxywybutosine
+    # Guanosine modifications
+    "mG/Gm":      359.06308,  # 7-methylguanosine / N2-methylguanosine / 2'-O-methylguanosine
+    "G'":         346.05740,  # di-guanosine derivative
+    "m22G":       373.07873,  # N2,N2-dimethylguanosine
+    "m22Gm":      387.09438,  # N2,N2,2'-O-trimethylguanosine
+    "archaeosine":386.07398,  # archaeosine (fa7d7G)
+    "Q":          471.11551,  # queuosine
+    "manQ/galQ":  633.16834,  # mannosyl- / galactosyl-queuosine
 }
-_DECODE_TOL = 0.08
+_DECODE_TOL = 0.07
 
 # ── Flask app ──────────────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -85,6 +141,11 @@ def analyze():
         top_n_chains_param = max(4, min(int(request.form.get("top_n_chains", "10") or "10"), 25))
     except (ValueError, TypeError):
         top_n_chains_param = 10
+    # Signal threshold: minimum Rel_I (% of block max) for a peak to be used as a chain seed
+    try:
+        min_rel_i_param = max(0.0, min(float(request.form.get("min_rel_i", "5") or "5"), 30.0))
+    except (ValueError, TypeError):
+        min_rel_i_param = 5.0
     fname = file.filename or "upload.xlsx"
     if not fname.lower().endswith((".xlsx", ".xls")):
         return jsonify({"detail": "Expected an Excel (.xlsx) file"}), 400
@@ -142,6 +203,28 @@ def analyze():
             )
             was_subsampled = True
 
+        # ── 5b. Mass-range + signal-threshold pre-filter ──────────────────
+        # The hydrolysis ladder range is 2,000–23,000 Da. The 2 kDa floor
+        # retains 6–7-mer fragments (short end of 5'/3' ladders) which carry
+        # meaningful coverage in the 2–5 kDa bin that the meeting breakdown
+        # table explicitly tracks. Above 23 kDa the algorithm "DID NOT ATTEMPT"
+        # per the reference spreadsheet.
+        # Only keep peaks with Rel_I ≥ min_rel_i_param% of their block max.
+        HYDRO_MASS_MIN = 2_000.0
+        HYDRO_MASS_MAX = 23_000.0
+        df_pipeline = df_pipeline[
+            (df_pipeline["M"] >= HYDRO_MASS_MIN) &
+            (df_pipeline["M"] <= HYDRO_MASS_MAX)
+        ].copy()
+        if min_rel_i_param > 0 and len(df_pipeline) > 0:
+            high_conf = df_pipeline[df_pipeline["Rel_I"] >= min_rel_i_param / 100.0]
+            # Only apply the Rel_I gate if it leaves enough points for the algorithm
+            if len(high_conf) >= 30:
+                df_pipeline = high_conf
+        if len(df_pipeline) == 0:
+            # No peaks survived filtering — likely intact data; run on unfiltered mass range
+            df_pipeline = df
+
         # ── 6. Reference tokens ───────────────────────────────────────────
         ref_tokens = None
         if ref_seq:
@@ -153,8 +236,22 @@ def analyze():
         out_dir = os.path.join(tmpdir, "output")
         os.makedirs(out_dir, exist_ok=True)
         try:
+            # Parameters matched to the reference spreadsheet:
+            #   mass_tol=0.05 Da  — spreadsheet col L; default is 0.02 (too strict)
+            #   rt_std_floor=0.30 — real LC-MS RT steps vary 0.3–1.0 min between
+            #     ladder positions; the 0.02 default gives ±0.05 min tolerance for
+            #     early chains (just 2 points), which cuts chains at 3 peaks instead
+            #     of 15+. 0.30 keeps the trend check meaningful without being punishing.
+            #   min_rt_history=3  — require 3 RT points (2 deltas) before applying
+            #     the trend filter, matching the "Check RT" logic in the spreadsheet
+            #     which implicitly needs 2 consecutive steps to establish a direction.
+            algo_cfg = _AlgoConfig(
+                mass_tol=0.05,
+                rt_std_floor=0.30,
+                min_rt_history=3,
+            )
             result = _run_nested_pipeline(
-                df=df_pipeline, out_dir=out_dir, reference=ref_tokens
+                df=df_pipeline, out_dir=out_dir, reference=ref_tokens, cfg=algo_cfg
             )
         except Exception as exc:
             return jsonify({"detail": f"Pipeline failed: {exc}"}), 500
@@ -180,6 +277,7 @@ def analyze():
             for _, row in rows.iterrows():
                 top_chains.append({
                     "chain_index": chain_idx,
+                    "read_rank": int(chain.get("read_rank", chain_idx + 1)),
                     "ladder_type": chain["ladder_type"],
                     "mass": float(row["M"]),
                     "rel_i": float(row["Rel_I"]),
@@ -187,35 +285,73 @@ def analyze():
                     "n_points": len(chain["indices"]),
                 })
 
-        # ── 9. Coverage by intensity percentile ───────────────────────────
-        data_sorted = data_df.sort_values("I", ascending=False).reset_index(drop=True)
-        n = len(data_sorted)
+        # ── 9. Coverage by intensity threshold ────────────────────────────
+        # Each bin answers: "of peaks with I ≥ X% of max, what fraction are
+        # explained by candidate reads?" — matches the breakdown-table format.
+        max_I_global = float(data_df["I"].max()) if len(data_df) > 0 else 1.0
         _used_status = {
             "primary_used", "ambiguous_retained",
             "conflict_retained", "reference_reused",
         }
-        is_used = (
-            data_sorted["peak_status"].isin(_used_status)
-            if "peak_status" in data_sorted.columns
-            else pd.Series(False, index=data_sorted.index)
+        is_used_series = (
+            data_df["peak_status"].isin(_used_status)
+            if "peak_status" in data_df.columns
+            else pd.Series(False, index=data_df.index)
         )
         coverage_bins = []
-        for lo, hi, label in [
-            (0.00, 0.02, "Top 0–2%"),
-            (0.02, 0.05, "Top 2–5%"),
-            (0.05, 0.10, "Top 5–10%"),
-            (0.10, 0.20, "Top 10–20%"),
-            (0.20, 0.50, "Top 20–50%"),
-            (0.50, 1.00, "Bottom 50%"),
+        for threshold, label in [
+            (0.10, ">10% of max intensity"),
+            (0.05, ">5% of max intensity"),
+            (0.02, ">2% of max intensity"),
+            (0.00, "All peaks"),
         ]:
-            sub = is_used.iloc[int(n * lo) : int(n * hi)]
-            total = len(sub)
-            matched = int(sub.sum())
+            mask = (
+                data_df["I"] >= threshold * max_I_global
+                if threshold > 0
+                else pd.Series(True, index=data_df.index)
+            )
+            total = int(mask.sum())
+            matched = int((mask & is_used_series).sum())
             coverage_bins.append({
                 "label": label,
                 "total": total,
                 "matched": matched,
                 "pct": round(matched / total * 100, 1) if total else 0,
+            })
+
+        # Coverage by mass range — matches the meeting breakdown table:
+        # for each mass bin (2-5K, 5-10K, 10-15K, 15-23K), count peaks above
+        # each intensity threshold and how many are explained by chains.
+        # Thresholds are relative to the global max across the full 2-23K range.
+        coverage_by_mass_range = []
+        for mass_lo, mass_hi, mass_label in [
+            (2_000, 5_000, "2–5 kDa"),
+            (5_000, 10_000, "5–10 kDa"),
+            (10_000, 15_000, "10–15 kDa"),
+            (15_000, 23_000, "15–23 kDa"),
+        ]:
+            sub = data_df[(data_df["M"] >= mass_lo) & (data_df["M"] < mass_hi)]
+            if len(sub) == 0:
+                continue
+            sub_used = (
+                sub["peak_status"].isin(_used_status)
+                if "peak_status" in sub.columns
+                else pd.Series(False, index=sub.index)
+            )
+            thresholds_row = []
+            for pct, lbl in [(0.10, ">10%"), (0.05, ">5%"), (0.02, ">2%")]:
+                mask_sub = sub["I"] >= pct * max_I_global
+                total_sub = int(mask_sub.sum())
+                matched_sub = int((mask_sub & sub_used).sum())
+                thresholds_row.append({
+                    "threshold": lbl,
+                    "total": total_sub,
+                    "matched": matched_sub,
+                    "pct": round(matched_sub / total_sub * 100, 1) if total_sub else 0,
+                })
+            coverage_by_mass_range.append({
+                "mass_range": mass_label,
+                "thresholds": thresholds_row,
             })
 
         # ── 10. Sigmoid post-pipeline ─────────────────────────────────────
@@ -255,6 +391,7 @@ def analyze():
         # ── 12. Build Excel ───────────────────────────────────────────────
         sidecar = {
             "coverage_by_intensity": coverage_bins,
+            "coverage_by_mass_range": coverage_by_mass_range,
             "reference_sequence": "".join(ref_tokens) if ref_tokens else None,
             "n_pipeline_points": len(df_pipeline),
             "n_original_points": n_original,
@@ -303,6 +440,7 @@ def analyze():
             "n_chains_min_10": n_chains_min_10,
             "min_chain_len_shown": min_len,
             "coverage_by_intensity": coverage_bins,
+            "coverage_by_mass_range": coverage_by_mass_range,
             "sigmoid_post_pipeline": _sanitize(sigmoid_post),
             "was_subsampled": was_subsampled,
             "n_original_points": n_original,
@@ -322,10 +460,19 @@ def _detect_data_type(df):
     raw_k = (df["M"] / BLOCK_WIDTH_DA).round()
     n_over = int((raw_k > N_BLOCKS).sum())
     frac_over = n_over / n if n else 0.0
-    if frac_over > 0.01:
+    max_mass = float(df["M"].max()) if n > 0 else 0.0
+
+    # Strong indicator: mass range extends well beyond the hydrolysis ladder range
+    if max_mass > 25_000:
+        reasons.append(
+            f"Maximum mass {max_mass:,.0f} Da exceeds the hydrolysis range (2,000–23,000 Da). "
+            "This file likely contains intact RNA mass data — the ladder algorithm "
+            "only uses the 2,000–23,000 Da region."
+        )
+    elif frac_over > 0.01:
         reasons.append(
             f"{n_over} point(s) ({frac_over * 100:.1f}%) have mass above the "
-            f"~{N_BLOCKS * BLOCK_WIDTH_DA:.0f} Da ladder range and get clipped into the last block."
+            f"~{N_BLOCKS * BLOCK_WIDTH_DA:.0f} Da ladder range."
         )
     if n < 600:
         reasons.append(f"Only {n} data points — hydrolysis ladders are typically 1,000+.")
@@ -337,7 +484,8 @@ def _detect_data_type(df):
                 f"Only {used}/{span} blocks in range are populated — "
                 "points look clustered rather than forming a continuous ladder."
             )
-    return {"likely_intact": len(reasons) >= 2 or frac_over > 0.03, "reasons": reasons}
+    likely_intact = len(reasons) >= 2 or frac_over > 0.03 or max_mass > 30_000
+    return {"likely_intact": likely_intact, "reasons": reasons}
 
 
 def _build_scatter(df):
@@ -523,6 +671,39 @@ def _build_excel(out_dir_str, sidecar):
             cell.border = border
             cell.fill = PatternFill("solid", fgColor=clr)
     ws2.freeze_panes = "A2"
+
+    # Mass-range breakdown (matches the UI table: rows = mass bins, cols = thresholds)
+    cov_mass = sidecar.get("coverage_by_mass_range") or []
+    if cov_mass:
+        ws2.append([])
+        r_section = ws2.max_row + 1
+        sec = ws2.cell(row=r_section, column=1, value="Coverage by Mass Range")
+        sec.font = Font(bold=True, size=11)
+        r_hdr = r_section + 1
+        for ci, h in enumerate(["Mass Range", ">10% of max", ">5% of max", ">2% of max"], 1):
+            cell = ws2.cell(row=r_hdr, column=ci, value=h)
+            cell.fill = HDR_FILL
+            cell.font = HDR_FONT
+            cell.alignment = Alignment(horizontal="center")
+            cell.border = border
+        for row_data in cov_mass:
+            r = ws2.max_row + 1
+            ws2.cell(row=r, column=1, value=row_data["mass_range"]).border = border
+            ws2.cell(row=r, column=1).font = Font(bold=True)
+            for ci, t in enumerate(row_data.get("thresholds", []), 2):
+                clr = (
+                    "D1FAE5" if t["pct"] >= 80
+                    else "FEF3C7" if t["pct"] >= 50
+                    else "FFEDD5" if t["pct"] >= 20
+                    else "FEE2E2"
+                )
+                cell = ws2.cell(
+                    row=r, column=ci,
+                    value=f'{t["pct"]}% ({t["matched"]}/{t["total"]})'
+                )
+                cell.border = border
+                cell.fill = PatternFill("solid", fgColor=clr)
+
     auto_width(ws2)
 
     # Sheet 3: Annotated Peak Table
@@ -615,6 +796,65 @@ def _build_excel(out_dir_str, sidecar):
         "Reference sequence",
         (f"Yes ({len(ref)} nt): {ref[:40]}…" if ref and len(ref) > 40 else (f"Yes: {ref}" if ref else "No")),
     )
+
+    # ── Modification profile ───────────────────────────────────────────────────
+    # Decode all chains ≥ min_len and count each residue type.
+    # Non-canonical entries flag candidate modifications for follow-up.
+    ws4.append([])
+    r_sec = ws4.max_row + 1
+    ws4.cell(row=r_sec, column=1, value="Decoded Modification Profile").font = Font(bold=True, size=11)
+    ws4.cell(row=r_sec, column=1).fill = PatternFill("solid", fgColor="EFF6FF")
+    mod_counter: dict = {}
+    if peak_status is not None and read_summary is not None:
+        try:
+            ps_w = peak_status[peak_status["read_rank"].notna()].copy()
+            ps_w["read_rank"] = ps_w["read_rank"].astype(int)
+            m_by_rk = {
+                int(rk): grp["mass"].tolist()
+                for rk, grp in ps_w.groupby("read_rank")
+            }
+            for _, row in read_summary.iterrows():
+                rk = int(row.get("read_rank", 0) or 0)
+                length = int(row.get("read_length", 0) or 0)
+                if length < min_len:
+                    continue
+                masses = sorted(m for m in m_by_rk.get(rk, []) if m)
+                if len(masses) < 2:
+                    continue
+                for nt in _decode_sequence(masses).split("-"):
+                    mod_counter[nt] = mod_counter.get(nt, 0) + 1
+        except Exception:
+            pass
+
+    canonical_set = {"A", "U", "G", "C"}
+    total_decoded = sum(mod_counter.values())
+    canonical_count = sum(v for k, v in mod_counter.items() if k in canonical_set)
+    mod_count = sum(v for k, v in mod_counter.items() if k not in canonical_set and not k.startswith("?"))
+    unknown_count = sum(v for k, v in mod_counter.items() if k.startswith("?"))
+    kv(ws4, "Total positions decoded", total_decoded if total_decoded else "—")
+    kv(ws4, "Canonical (A/U/G/C) positions", canonical_count if total_decoded else "—")
+    kv(ws4, "Modified positions identified", mod_count if total_decoded else "—")
+    kv(ws4, "Unresolved positions (?mass)", unknown_count if total_decoded else "—")
+    mods_found = {k: v for k, v in mod_counter.items()
+                  if k not in canonical_set and not k.startswith("?")}
+    if mods_found:
+        ws4.append([])
+        ws4.cell(row=ws4.max_row, column=1, value="  Modification").font = Font(bold=True, italic=True)
+        ws4.cell(row=ws4.max_row, column=2, value="Count (positions)").font = Font(bold=True, italic=True)
+        for mod, count in sorted(mods_found.items(), key=lambda x: -x[1]):
+            r = ws4.max_row + 1
+            ws4.cell(row=r, column=1, value=f"  {mod}")
+            ws4.cell(row=r, column=2, value=count)
+    if unknown_count:
+        # List unresolved mass deltas so researcher can investigate
+        ws4.append([])
+        ws4.cell(row=ws4.max_row + 1, column=1,
+                 value="  Unresolved mass deltas (not in modification dictionary):").font = Font(italic=True)
+        unknowns = {k: v for k, v in mod_counter.items() if k.startswith("?")}
+        for delta, count in sorted(unknowns.items(), key=lambda x: -x[1]):
+            r = ws4.max_row + 1
+            ws4.cell(row=r, column=1, value=f"  {delta} Da")
+            ws4.cell(row=r, column=2, value=f"{count} occurrence(s)")
 
     buf = io.BytesIO()
     wb.save(buf)

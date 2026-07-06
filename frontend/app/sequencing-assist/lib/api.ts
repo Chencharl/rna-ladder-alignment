@@ -40,6 +40,7 @@ export interface UploadRawResponse {
 
 export interface ChainPoint {
   chain_index: number;
+  read_rank: number;
   ladder_type: string;
   mass: number;
   rel_i: number;
@@ -59,6 +60,7 @@ export interface PipelineResponse {
   n_chains_min_10: number;
   min_chain_len_shown: number;
   coverage_by_intensity: CoverageBin[] | null;
+  coverage_by_mass_range: CoverageByMassRange[] | null;
   sigmoid_post_pipeline: SigmoidPostPoint[] | null;
   was_subsampled: boolean;
   n_original_points: number;
@@ -77,6 +79,18 @@ export interface CoverageBin {
   total: number;
   matched: number;
   pct: number;
+}
+
+export interface CoverageRangeThreshold {
+  threshold: string;   // ">10%", ">5%", ">2%"
+  total: number;
+  matched: number;
+  pct: number;
+}
+
+export interface CoverageByMassRange {
+  mass_range: string;  // "2–5 kDa", etc.
+  thresholds: CoverageRangeThreshold[];
 }
 
 // Combined single-phase response returned by /api/sequencing-assist on Vercel.
@@ -121,6 +135,7 @@ export async function runPipeline(
 export interface PipelineParams {
   minChainLen?: number;  // minimum ladder positions for a chain to be reported (default 10)
   topNChains?: number;   // number of top chains to include in plot data (default 10)
+  minRelI?: number;      // minimum Rel_I (% of block max) for a peak to be a chain seed (default 5)
 }
 
 // Single-phase endpoint used on Vercel: upload + full pipeline in one request.
@@ -134,6 +149,7 @@ export async function analyzeFile(
   if (referenceSequence.trim()) form.append("reference_sequence", referenceSequence.trim());
   if (params.minChainLen != null) form.append("min_chain_len", String(params.minChainLen));
   if (params.topNChains != null) form.append("top_n_chains", String(params.topNChains));
+  if (params.minRelI != null) form.append("min_rel_i", String(params.minRelI));
   const res = await fetch("/api/sequencing-assist", {
     method: "POST",
     body: form,
