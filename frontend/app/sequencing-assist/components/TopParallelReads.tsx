@@ -26,9 +26,14 @@ const RESIDUE_MASSES: Record<string, number> = {
 };
 const DECODE_TOL = 0.07;
 
-// Isobaric pairs: mass-indistinguishable modifications at this tolerance
+// Isobaric / near-isobaric pairs: cannot be resolved by mass at chain-building
+// tolerance (0.05 Da).  mo5U (336.036) and m5s2U (336.018) differ by 0.018 Da —
+// indistinguishable when the chain builder uses 0.05 Da tolerance.
+// mcm5s2U (394.024) and mchm5U (394.041) differ by 0.017 Da — same issue.
 const ISOBARIC_SET = new Set([
   "Um/m1Ψ", "s2U/s4U", "m5C/Cm", "mA/Am", "mG/Gm", "manQ/galQ",
+  "mo5U", "m5s2U",       // Δ = 0.018 Da — within 0.05 Da chain tolerance
+  "mcm5s2U", "mchm5U",   // Δ = 0.018 Da — within 0.05 Da chain tolerance
 ]);
 
 interface DecodedStep {

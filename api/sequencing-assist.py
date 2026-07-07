@@ -71,7 +71,6 @@ _RESIDUE_MASS: dict[str, float] = {
     "cmnm5s2U":   409.03449,  # 5-carboxymethylaminomethyl-2-thiouridine
     "tm5U":       443.04000,  # 5-taurinomethyluridine
     "tm5s2U":     459.01710,  # 5-taurinomethyl-2-thiouridine
-    "X(acp3U)":   407.07298,  # (same mass as acp3U — resolved to closest)
     # Cytidine modifications
     "s2C":        321.01844,  # 2-thiocytidine
     "m5C/Cm":     319.05694,  # 5-methylcytidine / 2'-O-methylcytidine
@@ -89,7 +88,7 @@ _RESIDUE_MASS: dict[str, float] = {
     "m6t6A":      488.10568,  # N6-methyl-N6-threonylcarbamoyladenosine
     "ms2t6A":     520.07775,  # 2-methylthio-N6-threonylcarbamoyladenosine
     "Ar(p)":      541.06111,  # 2'-O-ribosyladenosine (phosphate)
-    "yW":         212.01060,  # wybutosine (see dictionary; verify mass for your context)
+    "yW":         212.01060,  # wybutosine (MODOMICS fragment mass; full residue ≈467 Da — use with caution)
     "o2yW":       602.13737,  # peroxywybutosine
     # Guanosine modifications
     "mG/Gm":      359.06308,  # 7-methylguanosine / N2-methylguanosine / 2'-O-methylguanosine
@@ -100,6 +99,13 @@ _RESIDUE_MASS: dict[str, float] = {
     "Q":          471.11551,  # queuosine
     "manQ/galQ":  633.16834,  # mannosyl- / galactosyl-queuosine
 }
+# _CHAIN_TOL: mass tolerance used by the chain-building algorithm (must match
+# the mass_tol passed to _AlgoConfig below).  Used in the FDR null model so
+# the null step-match rate reflects the same rule as the chain builder.
+_CHAIN_TOL = 0.05
+# _DECODE_TOL: slightly looser tolerance for the post-hoc sequence decoder.
+# Chain building is already done; 0.07 Da gives a small margin for rounding
+# when labeling a step that was already accepted at 0.05 Da.
 _DECODE_TOL = 0.07
 
 # ── Flask app ──────────────────────────────────────────────────────────────────
@@ -290,11 +296,16 @@ def analyze():
             #   min_rt_history=3  — require 3 RT points (2 deltas) before applying
             #     the trend filter, matching the "Check RT" logic in the spreadsheet
             #     which implicitly needs 2 consecutive steps to establish a direction.
+            # Pass the full modification dictionary so the chain builder can
+            # extend through all 47 known modifications — the algorithm's
+            # DEFAULT_ALLOWED_MASSES only covers ~30 entries and would miss
+            # tm5U, acp3U, manQ/galQ, archaeosine, ms2t6A, Ar(p), etc.
             algo_cfg = _AlgoConfig(
-                mass_tol=0.05,
+                mass_tol=_CHAIN_TOL,
                 rt_std_floor=0.30,
                 min_rt_history=3,
                 precursor_mass=precursor_mass_param,
+                allowed_masses=dict(_RESIDUE_MASS),
             )
             result = _run_nested_pipeline(
                 df=df_pipeline, out_dir=out_dir, reference=ref_tokens, cfg=algo_cfg
@@ -685,7 +696,7 @@ def _compute_step_match_null(df, n_sample=3000):
             if diff < min_residue:
                 continue
             null_total += 1
-            if float(np.min(np.abs(residue_arr - diff))) <= _DECODE_TOL:
+            if float(np.min(np.abs(residue_arr - diff))) <= _CHAIN_TOL:
                 null_matches += 1
 
     if null_total == 0:
