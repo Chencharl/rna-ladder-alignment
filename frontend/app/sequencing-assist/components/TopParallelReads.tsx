@@ -171,7 +171,7 @@ export function TopParallelReads({
                         className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200"
                         title={`${g.nIsobaric} position(s) are isobaric pairs — mass alone cannot resolve the modification identity`}
                       >
-                        {g.nIsobaric}× isobaric
+                        {g.nIsobaric}x isobaric
                       </span>
                     )}
                   </div>
