@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import dynamic from "next/dynamic";
-import type { CoverageBin, CoverageByMassRange } from "../lib/api";
+import type { CoverageBin, CoverageByMassRange, EmpiricalFDR } from "../lib/api";
 import { Card, EmptyState } from "./ui";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
@@ -24,9 +24,11 @@ function barColor(pct: number) {
 export function CoverageByIntensity({
   bins,
   byMassRange,
+  fdrEstimate,
 }: {
   bins: CoverageBin[] | null;
   byMassRange?: CoverageByMassRange[] | null;
+  fdrEstimate?: EmpiricalFDR | null;
 }) {
   const [showCounts, setShowCounts] = useState(false);
 
@@ -171,6 +173,40 @@ export function CoverageByIntensity({
           <p className="text-xs text-gray-400 mt-1.5">
             Thresholds relative to the global maximum intensity in the 2,000–23,000 Da range.
             Well-resolved hydrolysis data should show ≥97% in the 5–23 kDa rows at the &gt;10% level.
+          </p>
+        </div>
+      )}
+
+      {/* ── Empirical FDR panel ── */}
+      {fdrEstimate && (
+        <div className="mt-5 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
+          <p className="text-xs font-semibold text-blue-800 mb-1">
+            Chain-level false-discovery rate estimate
+          </p>
+          <p className="text-xs text-blue-700 mb-2">
+            Random mass-step match rate:{" "}
+            <span className="font-mono font-semibold">
+              {fdrEstimate.p_step_null_pct.toFixed(2)}%
+            </span>{" "}
+            ({fdrEstimate.n_pairs_tested.toLocaleString()} peak-pair differences evaluated).
+          </p>
+          <div className="flex flex-wrap gap-3">
+            {Object.entries(fdrEstimate.fdr_by_chain_length_pct).map(([len, fdr]) => (
+              <div key={len} className="text-center">
+                <div className="text-xs text-blue-500">{len}-nt chain</div>
+                <div
+                  className={`text-xs font-mono font-semibold ${
+                    fdr < 1e-6 ? "text-green-700" : fdr < 0.01 ? "text-yellow-700" : "text-red-600"
+                  }`}
+                >
+                  {fdr < 1e-10 ? "<10⁻¹⁰%" : fdr < 1e-6 ? `${fdr.toExponential(1)}%` : `${fdr.toFixed(4)}%`}
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-blue-500 mt-2 italic">
+            FDR is the probability a chain of that length arose entirely from random mass coincidence.
+            Chains ≥10 positions are statistically robust under these data parameters.
           </p>
         </div>
       )}

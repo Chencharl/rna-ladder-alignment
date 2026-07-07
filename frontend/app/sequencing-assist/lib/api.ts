@@ -48,6 +48,13 @@ export interface ChainPoint {
   n_points: number;
 }
 
+export interface ModCount {
+  nt: string;
+  count: number;
+  is_canonical: boolean;
+  is_unknown: boolean;
+}
+
 export interface PipelineResponse {
   report: Record<string, unknown>;
   top_parallel_reads_long: Record<string, unknown>[] | null;
@@ -61,6 +68,10 @@ export interface PipelineResponse {
   min_chain_len_shown: number;
   coverage_by_intensity: CoverageBin[] | null;
   coverage_by_mass_range: CoverageByMassRange[] | null;
+  empirical_fdr: EmpiricalFDR | null;
+  rt_quality: RtQuality | null;
+  precursor_mass_used: number | null;
+  mod_counts: ModCount[] | null;
   sigmoid_post_pipeline: SigmoidPostPoint[] | null;
   was_subsampled: boolean;
   n_original_points: number;
@@ -133,9 +144,26 @@ export async function runPipeline(
 }
 
 export interface PipelineParams {
-  minChainLen?: number;  // minimum ladder positions for a chain to be reported (default 10)
-  topNChains?: number;   // number of top chains to include in plot data (default 10)
-  minRelI?: number;      // minimum Rel_I (% of block max) for a peak to be a chain seed (default 5)
+  minChainLen?: number;   // minimum ladder positions for a chain to be reported (default 10)
+  topNChains?: number;    // number of top chains to include in plot data (default 10)
+  minRelI?: number;       // minimum Rel_I (% of block max) for a peak to be a chain seed (default 5)
+  precursorMass?: number; // intact RNA mass (Da); enables closure scoring in 5'/3' pairing
+}
+
+export interface RtQuality {
+  r2: number;           // R² of RT vs log(mass) regression
+  slope: number;        // minutes per log-Da — positive = good sigmoidal separation
+  n_points: number;
+  grade: "excellent" | "good" | "marginal" | "flat/poor";
+}
+
+export interface EmpiricalFDR {
+  p_step_null_pct: number;       // % chance a random mass-pair step matches a residue
+  n_pairs_tested: number;        // how many peak-pair differences were evaluated
+  fdr_by_chain_length_pct: {     // estimated FDR (%) for chains of each length
+    [length: string]: number;
+  };
+  interpretation: string;        // human-readable summary
 }
 
 // Single-phase endpoint used on Vercel: upload + full pipeline in one request.
@@ -150,6 +178,7 @@ export async function analyzeFile(
   if (params.minChainLen != null) form.append("min_chain_len", String(params.minChainLen));
   if (params.topNChains != null) form.append("top_n_chains", String(params.topNChains));
   if (params.minRelI != null) form.append("min_rel_i", String(params.minRelI));
+  if (params.precursorMass != null && params.precursorMass > 0) form.append("precursor_mass", String(params.precursorMass));
   const res = await fetch("/api/sequencing-assist", {
     method: "POST",
     body: form,

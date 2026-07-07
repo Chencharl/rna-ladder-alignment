@@ -1,12 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { CoverageByIntensity } from "./components/CoverageByIntensity";
+import { ComparisonPanel } from "./components/ComparisonPanel";
 import { ExcelUploader } from "./components/ExcelUploader";
 import { MassRTPlot } from "./components/MassRTPlot";
 import { PeakScatterPlot } from "./components/PeakScatterPlot";
 import { QCPreview } from "./components/QCPreview";
+import { RunOverview } from "./components/RunOverview";
+import { ModificationProfile } from "./components/ModificationProfile";
+import { MethodsGuide } from "./components/MethodsGuide";
 import { TopParallelReads } from "./components/TopParallelReads";
 import { Card } from "./components/ui";
 import type {
@@ -16,6 +20,9 @@ import type {
   ChainPoint,
   CoverageBin,
   CoverageByMassRange,
+  EmpiricalFDR,
+  RtQuality,
+  ModCount,
   SigmoidPostPoint,
   PipelineParams,
 } from "./lib/api";
@@ -42,6 +49,7 @@ export default function SequencingAssist() {
     minChainLen: 10,
     topNChains: 10,
     minRelI: 5,
+    precursorMass: undefined,
   });
 
   // Pipeline output
@@ -53,6 +61,9 @@ export default function SequencingAssist() {
   const [topChainsForPlot, setTopChainsForPlot] = useState<ChainPoint[] | null>(null);
   const [coverageBins, setCoverageBins] = useState<CoverageBin[] | null>(null);
   const [coverageMassRange, setCoverageMassRange] = useState<CoverageByMassRange[] | null>(null);
+  const [empiricalFdr, setEmpiricalFdr] = useState<EmpiricalFDR | null>(null);
+  const [rtQuality, setRtQuality] = useState<RtQuality | null>(null);
+  const [modCounts, setModCounts] = useState<ModCount[] | null>(null);
   const [sigmoidPost, setSigmoidPost] = useState<SigmoidPostPoint[] | null>(null);
   const [pipelineMeta, setPipelineMeta] = useState<{
     subsampled: boolean; nOriginal: number; nPipeline: number;
@@ -60,8 +71,26 @@ export default function SequencingAssist() {
   } | null>(null);
   const [selectedReadRank, setSelectedReadRank] = useState<number | null>(null);
   const [referenceSequence, setReferenceSequence] = useState("");
+  const [progressStage, setProgressStage] = useState(0);
+  const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Comparison mode (Tier 3) ─────────────────────────────────────────────
+  const [showCompare, setShowCompare] = useState(false);
+  const [compareFile, setCompareFile] = useState<File | null>(null);
+  const [compareRunning, setCompareRunning] = useState(false);
+  const [compareChains, setCompareChains] = useState<ChainPoint[] | null>(null);
+  const [compareCoverage, setCompareCoverage] = useState<CoverageBin[] | null>(null);
+  const [compareError, setCompareError] = useState<string | null>(null);
 
   const selectRead = useCallback((rank: number) => setSelectedReadRank(rank), []);
+
+  const PROGRESS_STAGES = [
+    "Parsing Excel and computing block-wise Rel_I…",
+    "Building nested mass-ladder chains…",
+    "Classifying 5′/3′ ladder orientation…",
+    "Computing coverage and decoding modifications…",
+    "Finalising results and generating Excel report…",
+  ];
 
   // Clears pipeline output but NOT uploadResult (callers set that themselves)
   function resetPipelineOutput() {
@@ -73,6 +102,9 @@ export default function SequencingAssist() {
     setTopChainsForPlot(null);
     setCoverageBins(null);
     setCoverageMassRange(null);
+    setEmpiricalFdr(null);
+    setRtQuality(null);
+    setModCounts(null);
     setSigmoidPost(null);
     setPipelineMeta(null);
     setSelectedReadRank(null);
@@ -89,6 +121,9 @@ export default function SequencingAssist() {
     setTopChainsForPlot(result.top_chains_for_plot ?? null);
     setCoverageBins(result.coverage_by_intensity ?? null);
     setCoverageMassRange(result.coverage_by_mass_range ?? null);
+    setEmpiricalFdr(result.empirical_fdr ?? null);
+    setRtQuality(result.rt_quality ?? null);
+    setModCounts(result.mod_counts ?? null);
     setSigmoidPost(result.sigmoid_post_pipeline ?? null);
     setPipelineMeta({
       subsampled: result.was_subsampled,
@@ -154,10 +189,39 @@ export default function SequencingAssist() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadResult, referenceSequence]);
 
+  async function handleRunComparison() {
+    if (!compareFile) return;
+    setCompareRunning(true);
+    setCompareError(null);
+    try {
+      const result = await analyzeFile(compareFile, "", pipelineParams);
+      setCompareChains(result.top_chains_for_plot ?? null);
+      setCompareCoverage(result.coverage_by_intensity ?? null);
+    } catch (err) {
+      setCompareError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCompareRunning(false);
+    }
+  }
+
   // ── Derived state ────────────────────────────────────────────────────────
 
   const hasResults = !!(report || topParallel || decisions);
   const isRunning = phase === "pipeline_running";
+
+  useEffect(() => {
+    if (isRunning) {
+      setProgressStage(0);
+      progressTimer.current = setInterval(() => {
+        setProgressStage((s) => Math.min(s + 1, PROGRESS_STAGES.length - 1));
+      }, 9000);
+    } else {
+      if (progressTimer.current) clearInterval(progressTimer.current);
+      setProgressStage(0);
+    }
+    return () => { if (progressTimer.current) clearInterval(progressTimer.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRunning]);
 
   function downloadExcelBlob() {
     if (!excelB64) return;
@@ -293,6 +357,41 @@ export default function SequencingAssist() {
                           className="w-24 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-gray-50"
                         />
                       </div>
+
+                      <div className="border-t border-gray-100 pt-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Intact RNA mass (Da){" "}
+                          <span className="font-normal text-gray-400 text-xs">optional</span>
+                        </label>
+                        <p className="text-xs text-gray-400 mb-2">
+                          If the measured intact/precursor mass is known, the algorithm uses it
+                          as a physical closure check: the 5′ and 3′ terminal masses should sum
+                          to the intact mass. Activates a +0.10 pairing-score bonus when they do.
+                          Leave blank for pure de-novo analysis.
+                        </p>
+                        <input
+                          type="number"
+                          min={1000}
+                          max={200000}
+                          step={1}
+                          placeholder="e.g. 23517"
+                          value={pipelineParams.precursorMass ?? ""}
+                          disabled={isRunning}
+                          onChange={(e) => {
+                            const v = e.target.value.trim();
+                            setPipelineParams((p) => ({
+                              ...p,
+                              precursorMass: v === "" ? undefined : Math.max(1000, Number(v) || 1000),
+                            }));
+                          }}
+                          className="w-36 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-gray-50"
+                        />
+                        {pipelineParams.precursorMass != null && (
+                          <p className="mt-1 text-xs text-blue-600">
+                            Closure scoring active — 5′+3′ terminal masses will be compared to {pipelineParams.precursorMass.toLocaleString()} Da.
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </Card>
 
@@ -336,15 +435,30 @@ export default function SequencingAssist() {
                 </div>
               )}
 
-              {/* Running indicator */}
+              {/* Running indicator — staged progress */}
               {isRunning && (
                 <div className="rounded-xl border border-blue-200 bg-blue-50 px-5 py-4">
-                  <p className="text-sm font-semibold text-blue-800 animate-pulse">
-                    Running de-novo chain recovery pipeline…
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Block-wise Rel_I → nested ladder alignment → 5′/3′ classification.
-                    Large files may take 30–60 s.
+                  <div className="flex items-center gap-3 mb-2">
+                    <svg className="animate-spin h-4 w-4 text-blue-600" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                    <p className="text-sm font-semibold text-blue-800 animate-pulse">
+                      {PROGRESS_STAGES[progressStage]}
+                    </p>
+                  </div>
+                  <div className="flex gap-1">
+                    {PROGRESS_STAGES.map((_, i) => (
+                      <div
+                        key={i}
+                        className={`h-1 flex-1 rounded-full transition-colors duration-500 ${
+                          i <= progressStage ? "bg-blue-500" : "bg-blue-200"
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2">
+                    Large files may take 30–60 s on first run.
                   </p>
                 </div>
               )}
@@ -439,41 +553,87 @@ export default function SequencingAssist() {
             </div>
           )}
 
-          {/* Download banner */}
+          {/* Download / completion banner */}
           {phase === "pipeline_complete" && (
-            <div className="flex items-center justify-between rounded-xl border border-green-200 bg-green-50 px-5 py-4">
-              <div>
-                <p className="text-sm font-semibold text-green-800">Analysis complete</p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {pipelineMeta && (
-                    <>
-                      {pipelineMeta.nChainsMin10} reads ≥ {pipelineMeta.minChainLenShown} nt
-                      recovered ({pipelineMeta.nChainsTotal} total chains).{" "}
-                    </>
-                  )}
-                  Excel includes candidate reads, decoded sequences, coverage analysis
-                  {referenceSequence.trim() ? ", and reference comparison" : ""}.
-                </p>
+            <div className="rounded-xl border border-green-200 bg-green-50 px-5 py-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-green-800 mb-2">Analysis complete</p>
+
+                  {/* Stat chips */}
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {pipelineMeta && (
+                      <span className="inline-flex items-center rounded-full bg-white border border-green-200 px-2.5 py-0.5 text-xs font-medium text-green-700">
+                        {pipelineMeta.nChainsMin10} reads ≥ {pipelineMeta.minChainLenShown} nt
+                      </span>
+                    )}
+                    {(report as any)?.read_call_counts && (
+                      <>
+                        <span className="inline-flex items-center rounded-full bg-blue-50 border border-blue-200 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                          {(report as any).read_call_counts["5prime"]} × 5′
+                        </span>
+                        <span className="inline-flex items-center rounded-full bg-purple-50 border border-purple-200 px-2.5 py-0.5 text-xs font-medium text-purple-700">
+                          {(report as any).read_call_counts["3prime"]} × 3′
+                        </span>
+                        {(report as any).read_call_counts.ambiguous > 0 && (
+                          <span className="inline-flex items-center rounded-full bg-yellow-50 border border-yellow-200 px-2.5 py-0.5 text-xs font-medium text-yellow-700">
+                            {(report as any).read_call_counts.ambiguous} ambiguous
+                          </span>
+                        )}
+                      </>
+                    )}
+                    {coverageBins && (() => {
+                      const top = coverageBins.find(b => b.label.includes(">10%"));
+                      return top && top.total > 0 ? (
+                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${top.pct >= 80 ? "bg-green-100 border-green-300 text-green-800" : "bg-orange-50 border-orange-200 text-orange-700"}`}>
+                          {top.pct}% coverage (&gt;10% threshold)
+                        </span>
+                      ) : null;
+                    })()}
+                    {modCounts && (() => {
+                      const mods = modCounts.filter(m => !m.is_canonical && !m.is_unknown);
+                      return mods.length > 0 ? (
+                        <span className="inline-flex items-center rounded-full bg-amber-50 border border-amber-200 px-2.5 py-0.5 text-xs font-medium text-amber-700">
+                          {mods.length} modification type{mods.length > 1 ? "s" : ""} found
+                        </span>
+                      ) : null;
+                    })()}
+                    {pipelineParams.precursorMass && (
+                      <span className="inline-flex items-center rounded-full bg-teal-50 border border-teal-200 px-2.5 py-0.5 text-xs font-medium text-teal-700">
+                        Closure scoring active ({pipelineParams.precursorMass.toLocaleString()} Da)
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-gray-400">
+                    Excel includes candidate reads, decoded sequences, coverage analysis, and modification profile
+                    {referenceSequence.trim() ? " + reference comparison" : ""}.
+                  </p>
+                </div>
+
+                {excelB64 ? (
+                  <button
+                    type="button"
+                    onClick={downloadExcelBlob}
+                    className="shrink-0 rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 transition-colors"
+                  >
+                    Download Excel
+                  </button>
+                ) : uploadResult ? (
+                  <a
+                    href={downloadResultsUrl(uploadResult.session_id)}
+                    download
+                    className="shrink-0 rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 transition-colors"
+                  >
+                    Download Excel
+                  </a>
+                ) : null}
               </div>
-              {excelB64 ? (
-                <button
-                  type="button"
-                  onClick={downloadExcelBlob}
-                  className="ml-4 shrink-0 rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 transition-colors"
-                >
-                  Download Excel
-                </button>
-              ) : uploadResult ? (
-                <a
-                  href={downloadResultsUrl(uploadResult.session_id)}
-                  download
-                  className="ml-4 shrink-0 rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 transition-colors"
-                >
-                  Download Excel
-                </a>
-              ) : null}
             </div>
           )}
+
+          {/* Run overview — read call breakdown + peak usage */}
+          {hasResults && <RunOverview report={report} />}
 
           {/* Core view 1 — Rel_I scatter */}
           {uploadResult && phase !== "idle" && (
@@ -497,19 +657,99 @@ export default function SequencingAssist() {
               topChains={topChainsForPlot}
               minChainLen={pipelineMeta?.minChainLenShown}
               selectedReadRank={selectedReadRank}
+              rtQuality={rtQuality}
             />
           )}
 
           {/* Core views 3 + 4 — coverage + candidate reads table */}
           {hasResults && (
             <>
-              <CoverageByIntensity bins={coverageBins} byMassRange={coverageMassRange} />
+              <CoverageByIntensity bins={coverageBins} byMassRange={coverageMassRange} fdrEstimate={empiricalFdr} />
               <TopParallelReads
                 rows={topParallel}
                 selectedReadRank={selectedReadRank}
                 onSelectRead={selectRead}
               />
+              <ModificationProfile counts={modCounts} />
             </>
+          )}
+
+          {/* Methods guide — visible once a file is selected or analysis complete */}
+          {(!!selectedFile || !!uploadResult || hasResults) && <MethodsGuide />}
+
+          {/* ── Tier 3: Sample comparison ── */}
+          {IS_VERCEL_MODE && phase === "pipeline_complete" && (
+            <div>
+              {!showCompare ? (
+                <button
+                  type="button"
+                  onClick={() => setShowCompare(true)}
+                  className="w-full rounded-xl border-2 border-dashed border-gray-200 px-6 py-4 text-sm text-gray-400 hover:border-blue-300 hover:text-blue-600 transition-colors"
+                >
+                  + Compare with a second sample (e.g. HEK vs HepG2, cell line vs tissue)
+                </button>
+              ) : (
+                <Card
+                  title="Sample B — Upload second file for comparison"
+                  subtitle={`Sample A is "${selectedFile?.name ?? "File A"}". Upload a second file to overlay candidate reads and compare coverage side-by-side.`}
+                >
+                  <ExcelUploader
+                    onUploaded={() => {}}
+                    onFileSelected={(f) => {
+                      setCompareFile(f);
+                      setCompareChains(null);
+                      setCompareCoverage(null);
+                      setCompareError(null);
+                    }}
+                    currentFile={compareFile}
+                    isRunning={compareRunning}
+                  />
+                  {compareFile && !compareRunning && (
+                    <div className="mt-3 flex gap-3 items-center">
+                      <button
+                        type="button"
+                        onClick={handleRunComparison}
+                        className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition-colors"
+                      >
+                        {compareChains ? "Re-run comparison" : "Run comparison"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowCompare(false);
+                          setCompareFile(null);
+                          setCompareChains(null);
+                          setCompareCoverage(null);
+                        }}
+                        className="text-sm text-gray-400 hover:text-gray-600"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                  {compareRunning && (
+                    <p className="mt-3 text-sm text-indigo-600 animate-pulse">
+                      Running pipeline on Sample B…
+                    </p>
+                  )}
+                  {compareError && (
+                    <p className="mt-3 text-sm text-red-600">Error: {compareError}</p>
+                  )}
+                </Card>
+              )}
+            </div>
+          )}
+
+          {/* ── Comparison overlay ── */}
+          {showCompare && compareChains && topChainsForPlot && (
+            <ComparisonPanel
+              labelA={selectedFile?.name?.replace(/\.xlsx?$/i, "") ?? "Sample A"}
+              labelB={compareFile?.name?.replace(/\.xlsx?$/i, "") ?? "Sample B"}
+              chainsA={topChainsForPlot}
+              chainsB={compareChains}
+              coverageA={coverageBins}
+              coverageB={compareCoverage}
+            />
           )}
 
         </div>

@@ -146,6 +146,18 @@ def analyze():
         min_rel_i_param = max(0.0, min(float(request.form.get("min_rel_i", "5") or "5"), 30.0))
     except (ValueError, TypeError):
         min_rel_i_param = 5.0
+    # Intact/precursor mass for closure scoring (optional). When provided the
+    # algorithm adds a +0.10 pairing-score bonus when the 5' + 3' terminal masses
+    # sum to the precursor within precursor_mass_tol (default 1.0 Da).
+    precursor_mass_param = None
+    try:
+        pm_raw = request.form.get("precursor_mass", "").strip()
+        if pm_raw:
+            pm_val = float(pm_raw)
+            if 1_000.0 <= pm_val <= 200_000.0:
+                precursor_mass_param = pm_val
+    except (ValueError, TypeError):
+        pass
     fname = file.filename or "upload.xlsx"
     if not fname.lower().endswith((".xlsx", ".xls")):
         return jsonify({"detail": "Expected an Excel (.xlsx) file"}), 400
@@ -203,6 +215,40 @@ def analyze():
             )
             was_subsampled = True
 
+        # ── 5a. RT quality metric ─────────────────────────────────────────
+        # R² of RT vs log(mass) measures how well the sigmoidal elution is
+        # developed.  Well-resolved ion-pairing gradient data should have
+        # R² ≥ 0.70 over the full 2–23 kDa range.
+        rt_quality = None
+        try:
+            rq_df = df_pipeline[
+                (df_pipeline["M"] >= 2000) & (df_pipeline["M"] <= 23000) &
+                df_pipeline["M"].notna() & df_pipeline["T"].notna()
+            ]
+            if len(rq_df) >= 20:
+                log_m = np.log(rq_df["M"].values)
+                rt_v  = rq_df["T"].values
+                lm_mean, rt_mean = log_m.mean(), rt_v.mean()
+                ss_tot = float(((rt_v - rt_mean) ** 2).sum())
+                beta   = float(((log_m - lm_mean) * (rt_v - rt_mean)).sum() /
+                               ((log_m - lm_mean) ** 2).sum())
+                alpha  = float(rt_mean - beta * lm_mean)
+                ss_res = float(((rt_v - (alpha + beta * log_m)) ** 2).sum())
+                r2     = max(0.0, 1.0 - ss_res / ss_tot) if ss_tot > 0 else 0.0
+                rt_quality = {
+                    "r2": round(r2, 3),
+                    "slope": round(beta, 4),
+                    "n_points": len(rq_df),
+                    "grade": (
+                        "excellent" if r2 >= 0.85
+                        else "good" if r2 >= 0.70
+                        else "marginal" if r2 >= 0.40
+                        else "flat/poor"
+                    ),
+                }
+        except Exception:
+            pass
+
         # ── 5b. Mass-range + signal-threshold pre-filter ──────────────────
         # The hydrolysis ladder range is 2,000–23,000 Da. The 2 kDa floor
         # retains 6–7-mer fragments (short end of 5'/3' ladders) which carry
@@ -249,6 +295,7 @@ def analyze():
                 mass_tol=0.05,
                 rt_std_floor=0.30,
                 min_rt_history=3,
+                precursor_mass=precursor_mass_param,
             )
             result = _run_nested_pipeline(
                 df=df_pipeline, out_dir=out_dir, reference=ref_tokens, cfg=algo_cfg
@@ -354,6 +401,12 @@ def analyze():
                 "thresholds": thresholds_row,
             })
 
+        # ── 9b. Empirical FDR estimate ────────────────────────────────────
+        try:
+            empirical_fdr = _compute_step_match_null(df_pipeline)
+        except Exception:
+            empirical_fdr = None
+
         # ── 10. Sigmoid post-pipeline ─────────────────────────────────────
         sp_df = data_df[["M", "T", "Rel_I"]].copy()
         sp_df["status"] = (
@@ -388,6 +441,92 @@ def analyze():
         peak_status_data = _read_csv("peak_status_csv")
         read_summary_data = _read_csv("read_summary_csv")
 
+        # ── 11b. Build report summary + modification counts ──────────────
+        # Derive read-call and peak-usage counts from the CSV data so the
+        # RunOverview component has structured stats without needing a separate
+        # base_calling_report.json file.
+        read_call_counts = {"5prime": 0, "3prime": 0, "ambiguous": 0, "conflict": 0}
+        peak_status_counts = {
+            "primary_used": 0, "ambiguous_retained": 0,
+            "conflict_retained": 0, "reference_reused": 0, "unused": 0,
+        }
+        if read_summary_data:
+            for row in read_summary_data:
+                call = str(row.get("ladder_call", "")).lower()
+                if "5" in call:
+                    read_call_counts["5prime"] += 1
+                elif "3" in call:
+                    read_call_counts["3prime"] += 1
+                elif "ambig" in call:
+                    read_call_counts["ambiguous"] += 1
+                else:
+                    read_call_counts["conflict"] += 1
+
+        if peak_status_data:
+            for row in peak_status_data:
+                s = str(row.get("peak_status", "unused"))
+                if s in peak_status_counts:
+                    peak_status_counts[s] += 1
+
+        used_peaks = peak_status_counts["primary_used"]
+        ambig_conflict = (
+            peak_status_counts["ambiguous_retained"] + peak_status_counts["conflict_retained"]
+        )
+        report_summary = {
+            "file_name": fname,
+            "runtime_seconds": 0,
+            "n_points": len(df_pipeline),
+            "n_chains": n_chains_total,
+            "n_blocks": int(df_pipeline["block"].nunique()),
+            "read_call_counts": read_call_counts,
+            "peak_status_counts": peak_status_counts,
+            "top_parallel_warning": ambig_conflict > max(used_peaks, 1),
+            "review_summary": {
+                "reads_5prime": read_call_counts["5prime"],
+                "reads_3prime": read_call_counts["3prime"],
+                "reads_ambiguous": read_call_counts["ambiguous"],
+                "reads_conflict": read_call_counts["conflict"],
+                "primary_used_peaks": used_peaks,
+                "reference_provided": ref_tokens is not None,
+                "reference_reuse_candidates_tested": 0,
+                "reference_reuse_accepted": 0,
+                "reference_reuse_rejected": 0,
+            },
+        }
+
+        # Modification counts: decode all qualified reads and tally residue types.
+        # Returned as a sorted list for the modification frequency panel.
+        mod_counter_json: dict = {}
+        if peak_status_data and read_summary_data:
+            try:
+                ps_w = pd.DataFrame(peak_status_data)
+                ps_w = ps_w[ps_w["read_rank"].notna()].copy()
+                ps_w["read_rank"] = ps_w["read_rank"].astype(int)
+                m_by_rk = {
+                    int(rk): grp["mass"].tolist()
+                    for rk, grp in ps_w.groupby("read_rank")
+                }
+                rs_df = pd.DataFrame(read_summary_data)
+                for _, row in rs_df.iterrows():
+                    rk = int(row.get("read_rank", 0) or 0)
+                    length = int(row.get("read_length", 0) or 0)
+                    if length < min_len:
+                        continue
+                    masses = sorted(m for m in m_by_rk.get(rk, []) if m)
+                    if len(masses) < 2:
+                        continue
+                    for nt in _decode_sequence(masses).split("-"):
+                        mod_counter_json[nt] = mod_counter_json.get(nt, 0) + 1
+            except Exception:
+                pass
+
+        canonical_set = {"A", "U", "G", "C"}
+        mod_counts_response = [
+            {"nt": nt, "count": count, "is_canonical": nt in canonical_set,
+             "is_unknown": nt.startswith("?")}
+            for nt, count in sorted(mod_counter_json.items(), key=lambda x: -x[1])
+        ]
+
         # ── 12. Build Excel ───────────────────────────────────────────────
         sidecar = {
             "coverage_by_intensity": coverage_bins,
@@ -399,6 +538,8 @@ def analyze():
             "n_chains_total": n_chains_total,
             "n_chains_min_10": n_chains_min_10,
             "min_chain_len_shown": min_len,
+            "rt_quality": rt_quality,
+            "precursor_mass": precursor_mass_param,
         }
         try:
             excel_bytes = _build_excel(out_dir, sidecar)
@@ -429,7 +570,8 @@ def analyze():
             "sigmoid_points": sigmoid_points,
             "data_type_warning": data_type_warning,
             # Pipeline fields
-            "report": {},
+            "report": report_summary,
+            "mod_counts": mod_counts_response,
             "top_parallel_reads_long": top_parallel,
             "sequencing_decision_summary": sequencing_decision,
             "classification_evidence": classification_ev,
@@ -441,6 +583,9 @@ def analyze():
             "min_chain_len_shown": min_len,
             "coverage_by_intensity": coverage_bins,
             "coverage_by_mass_range": coverage_by_mass_range,
+            "empirical_fdr": empirical_fdr,
+            "rt_quality": rt_quality,
+            "precursor_mass_used": precursor_mass_param,
             "sigmoid_post_pipeline": _sanitize(sigmoid_post),
             "was_subsampled": was_subsampled,
             "n_original_points": n_original,
@@ -506,6 +651,65 @@ def _build_sigmoid(df):
         low = low_pool.sample(n=min(8000 - len(high), len(low_pool)), random_state=42)
         sdf = pd.concat([high, low])
     return sdf.round(4).to_dict(orient="records")
+
+
+def _compute_step_match_null(df, n_sample=3000):
+    """
+    Estimate per-step false-match probability by sampling consecutive mass-pair
+    differences across the dataset and checking what fraction fall within the
+    decode tolerance of any residue mass.
+
+    For a chain of length L (L+1 peaks), P(all L steps match by chance) = p^L.
+    This gives an upper bound on the per-chain false-discovery rate.
+    """
+    masses = np.sort(df["M"].values)
+    if len(masses) < 4:
+        return None
+
+    if len(masses) > n_sample:
+        rng = np.random.default_rng(42)
+        idx = np.sort(rng.choice(len(masses), n_sample, replace=False))
+        masses = masses[idx]
+
+    residue_arr = np.array(sorted(_RESIDUE_MASS.values()))
+    max_residue = float(residue_arr[-1]) * 1.5  # upper limit for a valid residue step
+    min_residue = 150.0                           # below smallest canonical base (C ≈ 305 Da)
+
+    null_matches = 0
+    null_total = 0
+    n = len(masses)
+    for i in range(n):
+        for j in range(i + 1, n):
+            diff = masses[j] - masses[i]
+            if diff > max_residue:
+                break
+            if diff < min_residue:
+                continue
+            null_total += 1
+            if float(np.min(np.abs(residue_arr - diff))) <= _DECODE_TOL:
+                null_matches += 1
+
+    if null_total == 0:
+        return None
+
+    p_step = null_matches / null_total
+
+    # P(chain of length L passes entirely by chance) = p_step^(L−1)
+    fdr_by_length = {
+        str(L): round(p_step ** (L - 1) * 100, 8)
+        for L in [5, 8, 10, 15, 20]
+    }
+
+    return {
+        "p_step_null_pct": round(p_step * 100, 3),
+        "n_pairs_tested": null_total,
+        "fdr_by_chain_length_pct": fdr_by_length,
+        "interpretation": (
+            f"Random step-match rate: {p_step * 100:.2f}%. "
+            f"FDR for ≥10-nt chain: {fdr_by_length['10']:.2e}%. "
+            "Chains ≥10 positions are effectively not explainable by chance mass coincidence."
+        ),
+    }
 
 
 def _decode_sequence(masses):
@@ -796,6 +1000,12 @@ def _build_excel(out_dir_str, sidecar):
         "Reference sequence",
         (f"Yes ({len(ref)} nt): {ref[:40]}…" if ref and len(ref) > 40 else (f"Yes: {ref}" if ref else "No")),
     )
+    rtq = sidecar.get("rt_quality")
+    if rtq:
+        kv(ws4, "RT gradient quality", f"{rtq['grade']} (R² = {rtq['r2']:.3f}, slope = {rtq['slope']:.4f} min/log-Da, n = {rtq['n_points']} peaks)")
+    pm = sidecar.get("precursor_mass")
+    if pm:
+        kv(ws4, "Precursor mass (closure scoring)", f"{pm:.2f} Da")
 
     # ── Modification profile ───────────────────────────────────────────────────
     # Decode all chains ≥ min_len and count each residue type.

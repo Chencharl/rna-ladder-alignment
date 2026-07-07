@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import dynamic from "next/dynamic";
-import type { SigmoidPoint, SigmoidPostPoint, ChainPoint } from "../lib/api";
+import type { SigmoidPoint, SigmoidPostPoint, ChainPoint, RtQuality } from "../lib/api";
 import { Card, EmptyState } from "./ui";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
@@ -19,9 +19,10 @@ interface Props {
   topChains: ChainPoint[] | null;
   minChainLen?: number;
   selectedReadRank?: number | null;
+  rtQuality?: RtQuality | null;
 }
 
-export function MassRTPlot({ points, postPipeline, topChains, minChainLen = 10, selectedReadRank }: Props) {
+export function MassRTPlot({ points, postPipeline, topChains, minChainLen = 10, selectedReadRank, rtQuality }: Props) {
   const rtStats = useMemo(() => {
     const src = postPipeline || points;
     if (!src || src.length === 0) return null;
@@ -214,6 +215,22 @@ export function MassRTPlot({ points, postPipeline, topChains, minChainLen = 10, 
 
   return (
     <Card title="Mass vs. Retention Time" subtitle={subtitle}>
+      {/* RT quality badge */}
+      {rtQuality && (
+        <div className={`mb-3 flex items-center gap-3 rounded-lg border px-3 py-2 text-xs ${
+          rtQuality.grade === "excellent" ? "border-green-200 bg-green-50 text-green-800"
+          : rtQuality.grade === "good" ? "border-blue-200 bg-blue-50 text-blue-800"
+          : rtQuality.grade === "marginal" ? "border-yellow-200 bg-yellow-50 text-yellow-800"
+          : "border-red-200 bg-red-50 text-red-800"
+        }`}>
+          <span className="font-semibold capitalize">RT gradient: {rtQuality.grade}</span>
+          <span className="text-gray-500">R²(RT vs log M) = <span className="font-mono">{rtQuality.r2.toFixed(3)}</span></span>
+          <span className="text-gray-400">({rtQuality.n_points.toLocaleString()} peaks)</span>
+          {rtQuality.grade === "flat/poor" && (
+            <span className="ml-1 text-red-700">— reversed-phase ion-pairing gradient may not have been used</span>
+          )}
+        </div>
+      )}
       {isFlat && (
         <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
           <strong>Flat RT distribution detected.</strong> All fragments elute within a{" "}
