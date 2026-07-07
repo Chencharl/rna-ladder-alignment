@@ -12,6 +12,7 @@ import { RunOverview } from "./components/RunOverview";
 import { ModificationProfile } from "./components/ModificationProfile";
 import { MethodsGuide } from "./components/MethodsGuide";
 import { TopParallelReads } from "./components/TopParallelReads";
+import { SequenceAssembly } from "./components/SequenceAssembly";
 import { Card } from "./components/ui";
 import type {
   UploadRawResponse,
@@ -634,6 +635,11 @@ export default function SequencingAssist() {
 
           {/* Run overview — read call breakdown + peak usage */}
           {hasResults && <RunOverview report={report} />}
+
+          {/* Primary output — decoded sequence from best 5′ and 3′ reads */}
+          {hasResults && (
+            <SequenceAssembly rows={topParallel} />
+          )}
 
           {/* Core view 1 — Rel_I scatter */}
           {uploadResult && phase !== "idle" && (
