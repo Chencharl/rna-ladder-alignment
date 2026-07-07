@@ -15,9 +15,6 @@ import sys
 import tempfile
 import time
 
-import matplotlib
-matplotlib.use("Agg")  # non-interactive before any other matplotlib import
-
 import numpy as np
 import pandas as pd
 from flask import Flask, request, jsonify
