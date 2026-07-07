@@ -36,6 +36,8 @@ from trna_nested_algorithm import (  # noqa: E402
     Config as _AlgoConfig,
     BLOCK_WIDTH_DA,
     N_BLOCKS,
+    build_read_summary as _build_read_summary,
+    build_top_parallel_reads_long as _build_top_parallel_long,
 )
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -88,8 +90,8 @@ _RESIDUE_MASS: dict[str, float] = {
     "m6t6A":      488.10568,  # N6-methyl-N6-threonylcarbamoyladenosine
     "ms2t6A":     520.07775,  # 2-methylthio-N6-threonylcarbamoyladenosine
     "Ar(p)":      541.06111,  # 2'-O-ribosyladenosine (phosphate)
-    "yW":         212.01060,  # wybutosine (MODOMICS fragment mass; full residue ≈467 Da — use with caution)
-    "o2yW":       602.13737,  # peroxywybutosine
+    "yW":         469.09866,  # wybutosine (C17H21N5O7; residue = NMP − H2O = 487.110 − 18.011)
+    "o2yW":       485.09395,  # peroxywybutosine (yW + O; +15.995 Da oxidation)
     # Guanosine modifications
     "mG/Gm":      359.06308,  # 7-methylguanosine / N2-methylguanosine / 2'-O-methylguanosine
     "G'":         346.05740,  # di-guanosine derivative
@@ -445,11 +447,50 @@ def analyze():
             except Exception:
                 return None
 
-        top_parallel = _read_csv("top_parallel_reads_long_csv")
         sequencing_decision = _read_csv("sequencing_decision_summary_csv")
         classification_ev = _read_csv("classification_evidence_csv")
         peak_status_data = _read_csv("peak_status_csv")
-        read_summary_data = _read_csv("read_summary_csv")
+
+        # Build read_summary and top_parallel directly from algorithm objects
+        # so we avoid the TOP_PARALLEL_N=4 CSV ceiling and can include partner
+        # chains that fall outside the user's top_n_chains_param window.
+        try:
+            read_summary_df = _build_read_summary(data_df, chains_list, algo_cfg)
+            read_summary_data = _sanitize(
+                read_summary_df.where(read_summary_df.notna(), None).to_dict(orient="records")
+            )
+        except Exception:
+            read_summary_data = _read_csv("read_summary_csv")
+            read_summary_df = pd.DataFrame(read_summary_data or [])
+
+        try:
+            top_par_df = _build_top_parallel_long(
+                data_df, chains_list, read_summary_df, n=top_n_chains_param
+            )
+            # Add partner chains not already in the top N so SequenceAssembly
+            # can always display the true paired 5′/3′ chains together.
+            top_ranks = {int(r) for r in top_par_df["read_rank"].dropna().unique()}
+            partner_ranks_needed: set[int] = set()
+            for row in top_par_df.drop_duplicates("read_rank").to_dict("records"):
+                pr = row.get("candidate_partner_rank")
+                if pr is not None and not pd.isna(pr):
+                    pr_int = int(pr)
+                    if pr_int not in top_ranks:
+                        partner_ranks_needed.add(pr_int)
+            if partner_ranks_needed:
+                partner_chains = [
+                    c for c in chains_list if c.get("read_rank") in partner_ranks_needed
+                ]
+                if partner_chains:
+                    extra_df = _build_top_parallel_long(
+                        data_df, partner_chains, read_summary_df, n=len(partner_chains)
+                    )
+                    top_par_df = pd.concat([top_par_df, extra_df], ignore_index=True)
+            top_parallel = _sanitize(
+                top_par_df.where(top_par_df.notna(), None).to_dict(orient="records")
+            )
+        except Exception:
+            top_parallel = _read_csv("top_parallel_reads_long_csv")
 
         # ── 11b. Build report summary + modification counts ──────────────
         # Derive read-call and peak-usage counts from the CSV data so the
