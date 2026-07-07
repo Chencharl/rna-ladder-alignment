@@ -674,8 +674,8 @@ export default function SequencingAssist() {
             </>
           )}
 
-          {/* Methods guide — visible once a file is selected or analysis complete */}
-          {(!!selectedFile || !!uploadResult || hasResults) && <MethodsGuide />}
+          {/* Methods guide — always visible so users can read the algorithm description */}
+          <MethodsGuide />
 
           {/* ── Tier 3: Sample comparison ── */}
           {IS_VERCEL_MODE && phase === "pipeline_complete" && (

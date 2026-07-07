@@ -6,7 +6,7 @@ export function RunOverview({ report }: { report: BaseCallingReport | null }) {
   if (!report) {
     return (
       <Card title="Run Overview" subtitle="High-level summary of the base-calling run.">
-        <EmptyState>Upload base_calling_report.json to see run-level stats.</EmptyState>
+        <EmptyState>Run the analysis pipeline to see run-level statistics.</EmptyState>
       </Card>
     );
   }
