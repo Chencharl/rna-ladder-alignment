@@ -13,6 +13,7 @@ import math
 import os
 import sys
 import tempfile
+import time
 
 import matplotlib
 matplotlib.use("Agg")  # non-interactive before any other matplotlib import
@@ -127,6 +128,7 @@ def _preflight():
 @app.route("/", methods=["POST"])
 @app.route("/api/sequencing-assist", methods=["POST"])
 def analyze():
+    _t0 = time.time()
     file = request.files.get("file")
     if file is None:
         return jsonify({"detail": "No file provided"}), 400
@@ -474,7 +476,7 @@ def analyze():
         )
         report_summary = {
             "file_name": fname,
-            "runtime_seconds": 0,
+            "runtime_seconds": round(time.time() - _t0, 1),
             "n_points": len(df_pipeline),
             "n_chains": n_chains_total,
             "n_blocks": int(df_pipeline["block"].nunique()),
