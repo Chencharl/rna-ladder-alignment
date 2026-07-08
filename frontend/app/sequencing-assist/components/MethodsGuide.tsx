@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 
 const SECTIONS = [
   {
@@ -13,7 +13,7 @@ const SECTIONS = [
   },
   {
     heading: "Nested ladder algorithm",
-    body: `Seeds are the highest-intensity (block-normalized Rel_I) unassigned peaks. Each seed is extended greedily in both mass directions by matching consecutive peak-to-peak mass differences against the modification dictionary (±0.05 Da tolerance). A monotonic RT trend filter prevents physically implausible chains. Block-wise Rel_I normalization — computed within 320 Da mass windows — prevents high-density regions from dominating the seed queue. The algorithm returns all chains above the minimum length threshold, ranked by seed intensity.`,
+    body: `Seeds are the highest-intensity (block-normalized Rel_I) unassigned peaks. Each seed is extended greedily in both mass directions by matching consecutive peak-to-peak mass differences against the modification dictionary. Extension is constrained to strictly one residue per step (max_residues_per_step = 1), ensuring every chain edge maps to exactly one nucleotide; multi-residue gap jumps are not permitted. The default chain-building tolerance is ±0.05 Da. A monotonic RT trend filter (minimum 3-point history; RT standard deviation floor 0.30 min) rejects physically implausible extensions. Block-wise Rel_I normalization — computed within 320 Da mass windows — prevents high-density mass regions from monopolising the seed queue.`,
   },
   {
     heading: "5′ / 3′ classification",
@@ -21,21 +21,42 @@ const SECTIONS = [
   },
   {
     heading: "Coverage and FDR",
-    body: `Coverage is measured as the fraction of peaks above each intensity threshold that are explained by at least one candidate read. The empirical false-discovery rate estimates the probability that a chain of a given length arose entirely from random mass coincidences — computed by sampling all consecutive peak-pair mass differences in the dataset and measuring the fraction that fall within tolerance of any residue mass. For chains ≥10 positions, the FDR is typically <10⁻¹⁰ %, confirming that matched chains represent real biochemical signal.`,
+    body: `Coverage is measured as the fraction of peaks above each intensity threshold that are explained by at least one candidate read. The empirical false-discovery rate estimates the probability that a chain of a given length arose entirely from random mass coincidences — computed by sampling all consecutive peak-pair mass differences in the dataset and measuring the fraction that fall within ±0.05 Da of any residue mass. For chains ≥10 positions, the FDR is typically <10⁻¹⁰ %, confirming that matched chains represent real biochemical signal.`,
   },
   {
     heading: "Modification dictionary",
-    body: `Mass differences are decoded against 48 entries covering all four canonical nucleotides and 44 known tRNA modifications including D, Ψ variants, thio-uridines, acetyl-cytidines, isopentenyl-adenosines, methylated guanosines, queuosine, and archaeosine. Isobaric pairs (e.g. Um/m1Ψ at 320.04 Da, s2U/s4U at 322.00 Da, mA/Am at 343.07 Da) cannot be distinguished by mass alone and are flagged in amber throughout the interface. Positions with mass differences not matching any dictionary entry within tolerance are reported as unresolved (grey).`,
+    body: `Mass differences are decoded against 47 dictionary entries covering all four canonical nucleotides (A, U, G, C) and 43 RNA modifications: dihydrouridine (D), pseudouridine variants (Um/m1Ψ, 320.04 Da), thio-uridines (s2U/s4U, mnm5s2U, cmnm5s2U, m5s2U, mcm5s2U, tm5s2U), acetyl-cytidine (ac4C), lysidine (k2C), inosines (I, m1I), isopentenyl-adenosines (i6A, io6A, ms2i6A), threonylcarbamoyl-adenosines (t6A, m6t6A, ms2t6A), wybutosine (yW, 469.10 Da) and its oxidation product (o2yW, 485.09 Da), methylguanosines (m22G, m22Gm), archaeosine, queuosine (Q), and glycosylated queuosines (manQ/galQ). Formally isobaric pairs — entries sharing the same monoisotopic mass — are reported as "A/B" and highlighted amber; they cannot be distinguished by mass alone. Near-isobaric pairs (Δ ≤ 0.02 Da, e.g. mo5U vs m5s2U at 336.02–336.04 Da) are resolved to the closest match; hover over each token to see the observed Δ mass and mass error, which can guide manual review.`,
   },
   {
     heading: "Interpreting results",
-    body: `Candidate reads should be treated as sequencing hypotheses, not definitive calls. Key validation steps: (1) confirm that a paired 5′/3′ read pair's terminal masses sum to the measured intact RNA mass within ±1 Da; (2) cross-reference the decoded sequence against known tRNA family databases; (3) use orthogonal methods (HPLC-MS/MS, chemical probing) to confirm isobaric modification assignments; (4) check that high-intensity unexplained peaks (orange diamonds in the RT plot) are not artefacts before interpreting coverage gaps.`,
+    body: `Candidate reads should be treated as sequencing hypotheses, not definitive calls. Key validation steps: (1) confirm that a paired 5′/3′ read pair's terminal masses sum to the measured intact RNA mass within ±1 Da; (2) cross-reference the decoded sequence against known tRNA family databases; (3) use orthogonal methods (HPLC-MS/MS, chemical probing, or metabolic labelling) to confirm isobaric or near-isobaric modification assignments; (4) hover over each sequence token to verify the observed Δ mass and mass error — calls with errors near the tolerance limit (0.05 Da) warrant extra caution; (5) check that high-intensity unexplained peaks (orange in the RT plot) are not artefacts before interpreting coverage gaps.`,
+  },
+  {
+    heading: "Algorithm parameters (for methods sections)",
+    body: `The following fixed parameters govern chain recovery and can be cited directly in a paper methods section:\n\n• Block window: 320 Da (Rel_I normalisation)\n• Chain-building mass tolerance: ±0.05 Da\n• Post-hoc decoding tolerance: ±0.07 Da\n• Max residues per extension step: 1 (strict single-residue only)\n• RT trend filter: monotonic; std-floor 0.30 min; min 3-point history\n• Modification dictionary: 47 entries (4 canonical + 43 modifications)\n• Default seed threshold: top 5% of block-normalised Rel_I\n• Default minimum read length: 10 positions\n• FDR null model: random peak-pair Δ mass sampling, same ±0.05 Da window\n\nSuggested citation text:\n"De-novo sequence reads were recovered from deconvoluted monoisotopic masses using a nested ladder alignment algorithm. Peaks were normalised within 320 Da mass windows; seeds were extended greedily by matching consecutive mass differences against a 47-entry RNA modification dictionary (±0.05 Da tolerance; strictly one residue per step). 5′/3′ terminus assignment was based on terminal-nucleotide decimal mass signatures, retention-time correlation, and precursor mass closure scoring. Reads ≥10 positions were retained; empirical FDR was estimated by random peak-pair sampling."`,
   },
 ];
+
+// Extract the citation paragraph (last "block" after the blank line following "Suggested citation text:")
+function extractCitationText(body: string): string {
+  const marker = "Suggested citation text:\n";
+  const idx = body.indexOf(marker);
+  return idx >= 0 ? body.slice(idx + marker.length).trim() : "";
+}
 
 export function MethodsGuide() {
   const [open, setOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyCitation = useCallback((body: string) => {
+    const text = extractCitationText(body);
+    if (!text) return;
+    navigator.clipboard?.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, []);
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
@@ -93,9 +114,34 @@ export function MethodsGuide() {
                 <h3 className="text-sm font-semibold text-gray-800 mb-2">
                   {SECTIONS[activeIdx].heading}
                 </h3>
-                <p className="text-sm text-gray-600 leading-relaxed">
-                  {SECTIONS[activeIdx].body}
-                </p>
+                {SECTIONS[activeIdx].body.includes("\n") ? (
+                  <div className="space-y-3">
+                    <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">
+                      {SECTIONS[activeIdx].body.split("Suggested citation text:")[0]}
+                    </p>
+                    {SECTIONS[activeIdx].body.includes("Suggested citation text:") && (
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Suggested citation text</p>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyCitation(SECTIONS[activeIdx].body)}
+                            className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                          >
+                            {copied ? "✓ Copied" : "Copy"}
+                          </button>
+                        </div>
+                        <p className="text-xs text-gray-700 italic leading-relaxed">
+                          {extractCitationText(SECTIONS[activeIdx].body)}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-600 leading-relaxed">
+                    {SECTIONS[activeIdx].body}
+                  </p>
+                )}
               </div>
             )}
           </div>

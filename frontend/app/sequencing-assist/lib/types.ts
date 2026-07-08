@@ -169,6 +169,7 @@ export interface RefComparison {
   aligned_reference: string[]; // reference with gap characters ("-")
   mismatches: RefMismatch[];
   identity: number; // 0..1
+  orientation_corrected?: boolean; // true when a 3' chain was reversed to 5'→3' before alignment
 }
 
 // The set of files the dashboard recognizes by filename. Everything is

@@ -30,18 +30,45 @@ function tokenStyle(call: string): string {
   return `${base} bg-purple-50 text-purple-800 border-purple-200`;
 }
 
-function tokenTitle(call: string, mass: number): string {
-  if (call.startsWith("?")) return `Unresolved — Δmass = ${mass.toFixed(2)} Da (not in modification dictionary)`;
-  if (isAmbiguous(call))    return `Mass-ambiguous — cannot distinguish ${call} by mass alone; orthogonal validation (e.g. CMC, metabolic labeling) required`;
-  if (CANONICAL.has(call))  return call;
-  return `Modified: ${call}`;
+function tokenTitle(call: string, delta: number): string {
+  const expected = RESIDUE_MASSES[call];
+  const obs = `Δ = ${delta.toFixed(3)} Da`;
+  const errStr = expected != null
+    ? `, err = ${Math.abs(delta - expected).toFixed(4)} Da`
+    : "";
+  if (call.startsWith("?")) return `Unresolved — ${obs} (not in modification dictionary)`;
+  if (isAmbiguous(call))    return `Mass-ambiguous — cannot distinguish ${call} by mass alone; ${obs}${errStr}; requires orthogonal validation`;
+  if (CANONICAL.has(call))  return `${call} — ${obs}${errStr}`;
+  return `Modified: ${call} — ${obs}${errStr}`;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+// Subset of residue masses used only for error calculation in tooltips.
+// Full dictionary lives in TopParallelReads.tsx; keep in sync if masses change.
+const RESIDUE_MASSES: Record<string, number> = {
+  A:329.05252,U:306.02530,G:345.04743,C:305.04129,
+  D:308.04095,"Um/m1Ψ":320.04095,"s2U/s4U":322.00246,
+  mo5U:336.03587,m5s2U:336.01811,m5Um:334.05660,
+  mnm5U:349.06750,ncm5U:363.04677,mnm5s2U:365.04466,
+  mcm5U:378.04643,cmo5U:380.02570,cmnm5U:393.05733,
+  mcm5s2U:394.02359,mchm5U:394.04135,ncm5Um:377.06242,
+  acp3U:407.07298,cmnm5s2U:409.03449,tm5U:443.04000,
+  tm5s2U:459.01710,s2C:321.01844,"m5C/Cm":319.05694,
+  ac4C:347.05185,f5C:333.03620,k2C:433.13625,
+  I:330.03654,m1I:344.05200,"mA/Am":343.06817,
+  i6A:397.11512,io6A:413.11003,ms2i6A:443.10284,
+  t6A:474.09003,m6t6A:488.10568,ms2t6A:520.07775,
+  "Ar(p)":541.06111,yW:469.09866,o2yW:485.09395,
+  "mG/Gm":359.06308,"G'":346.05740,m22G:373.07873,
+  m22Gm:387.09438,archaeosine:386.07398,Q:471.11551,
+  "manQ/galQ":633.16834,
+};
+
 interface SeqStep {
   call: string;
-  mass: number;
+  mass: number;  // absolute fragment mass
+  delta: number; // mass difference from previous fragment (= observed residue mass)
 }
 
 interface AssembledChain {
@@ -67,7 +94,7 @@ function copy(text: string, onDone: () => void) {
 
 function StepToken({ step }: { step: SeqStep }) {
   return (
-    <span className={tokenStyle(step.call)} title={tokenTitle(step.call, step.mass)}>
+    <span className={tokenStyle(step.call)} title={tokenTitle(step.call, step.delta)}>
       {step.call}
     </span>
   );
@@ -86,8 +113,11 @@ function RefAlignmentRow({ refComp, is5prime }: { refComp: RefComparison; is5pri
   const [open, setOpen] = useState(false);
   const identity = Math.round(refComp.identity * 100);
   const n = refComp.mismatches.length;
-  // For 3' chain the algorithm aligned in 3'→5' order; note this in the display.
-  const orderNote = is5prime ? "" : " (3′→5′ read order)";
+  // 3' chains are now orientation-corrected in the API (reversed to 5'→3' before aligning).
+  // Only add a note if somehow we received an un-corrected 3' alignment.
+  const orientationNote = (!is5prime && !refComp.orientation_corrected)
+    ? " (⚠ 3′→5′ order — re-run to get corrected alignment)"
+    : "";
   return (
     <div className="mt-2 border-t border-gray-100 pt-2">
       <button
@@ -98,15 +128,16 @@ function RefAlignmentRow({ refComp, is5prime }: { refComp: RefComparison; is5pri
         {open ? "▲" : "▼"}
         {" "}Reference alignment: <span className={`font-semibold ${identity >= 80 ? "text-green-600" : identity >= 60 ? "text-amber-600" : "text-red-600"}`}>{identity}% identity</span>
         {n > 0 && <span className="text-gray-400">· {n} mismatch{n > 1 ? "es" : ""} (candidate modification sites)</span>}
-        {n === 0 && <span className="text-green-600">· all positions match{orderNote}</span>}
+        {n === 0 && <span className="text-green-600">· all positions match</span>}
+        {orientationNote && <span className="text-amber-600">{orientationNote}</span>}
       </button>
       {open && (
         <div className="mt-1.5 text-xs space-y-0.5">
           {n === 0 ? (
-            <p className="text-green-600 italic">No mismatches — recovered sequence matches reference exactly{orderNote}.</p>
+            <p className="text-green-600 italic">No mismatches — recovered sequence matches reference exactly.</p>
           ) : (
             <>
-              {n > 0 && <p className="text-gray-400 italic mb-1">Mismatched positions are candidate sites for RNA modifications, editing, or isoforms{orderNote}:</p>}
+              <p className="text-gray-400 italic mb-1">Mismatched positions are candidate sites for RNA modifications, editing, or isoforms:</p>
               {refComp.mismatches.map((mm, i) => (
                 <div key={i} className="flex items-center gap-2 pl-1">
                   <span className="text-gray-400 tabular-nums w-12">pos {mm.position}</span>
@@ -225,9 +256,13 @@ export function SequenceAssembly({
       const head = sorted[0];
       // row_position 0 is the seed fragment — its "call" is "(seed)", skip it.
       // Positions 1..N each carry the residue label for that extension step.
-      const steps: SeqStep[] = sorted
-        .filter(r => r.row_position > 0 && r.call !== "(seed)")
-        .map(r => ({ call: r.call, mass: r.mass }));
+      const seedMass = sorted.find(r => r.row_position === 0)?.mass ?? 0;
+      const nonSeed = sorted.filter(r => r.row_position > 0 && r.call !== "(seed)");
+      const steps: SeqStep[] = nonSeed.map((r, i) => ({
+        call: r.call,
+        mass: r.mass,
+        delta: r.mass - (i > 0 ? nonSeed[i - 1].mass : seedMass),
+      }));
       return {
         rank,
         ladderCall: head.ladder_call,

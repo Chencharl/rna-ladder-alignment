@@ -38,6 +38,7 @@ from trna_nested_algorithm import (  # noqa: E402
     N_BLOCKS,
     build_read_summary as _build_read_summary,
     build_top_parallel_reads_long as _build_top_parallel_long,
+    compare_to_reference as _compare_to_reference,
 )
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -511,14 +512,33 @@ def analyze():
             for comp in report.get("reference_comparisons", []) or []:
                 ci = comp.get("chain_index")
                 if ci is not None and 0 <= ci < len(chains_list):
-                    rk = chains_list[ci].get("read_rank")
+                    chain_meta = chains_list[ci]
+                    rk = chain_meta.get("read_rank")
                     if rk is not None and int(rk) in top_read_ranks:
-                        ref_comparison_map[str(int(rk))] = _sanitize({
-                            "aligned_read": list(comp.get("aligned_read", [])),
-                            "aligned_reference": list(comp.get("aligned_reference", [])),
-                            "mismatches": list(comp.get("mismatches", [])),
-                            "identity": round(float(comp.get("identity", 0.0)), 4),
-                        })
+                        # 3' chains have sequence_calls in 3'→5' order; reverse
+                        # before aligning against the 5'→3' reference so that
+                        # identity and mismatch positions are orientation-correct.
+                        # Raw chain dicts use "ladder_type" = "likely_3prime".
+                        ladder_type = str(chain_meta.get("ladder_type", "")).lower()
+                        is_3prime = "3prime" in ladder_type
+                        if is_3prime:
+                            calls = list(chain_meta.get("sequence_calls", []))
+                            corrected = _compare_to_reference(list(reversed(calls)), ref_tokens)
+                            ref_comparison_map[str(int(rk))] = _sanitize({
+                                "aligned_read": list(corrected.get("aligned_read", [])),
+                                "aligned_reference": list(corrected.get("aligned_reference", [])),
+                                "mismatches": list(corrected.get("mismatches", [])),
+                                "identity": round(float(corrected.get("identity", 0.0)), 4),
+                                "orientation_corrected": True,
+                            })
+                        else:
+                            ref_comparison_map[str(int(rk))] = _sanitize({
+                                "aligned_read": list(comp.get("aligned_read", [])),
+                                "aligned_reference": list(comp.get("aligned_reference", [])),
+                                "mismatches": list(comp.get("mismatches", [])),
+                                "identity": round(float(comp.get("identity", 0.0)), 4),
+                                "orientation_corrected": False,
+                            })
 
         # ── 11b. Build report summary + modification counts ──────────────
         # Derive read-call and peak-usage counts from the CSV data so the
