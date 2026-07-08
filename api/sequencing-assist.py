@@ -306,7 +306,10 @@ def _preflight():
 def analyze():
     _t0 = time.time()
     file = request.files.get("file")
-    if file is None:
+    # Client-side pre-parsed path: frontend sends {M,I,T} JSON when file > 3.5 MB
+    # to stay under Vercel's 4.5 MB serverless request body limit.
+    data_json_str = request.form.get("data_json")
+    if file is None and data_json_str is None:
         return jsonify({"detail": "No file provided"}), 400
 
     ref_seq = request.form.get("reference_sequence", "").strip()
@@ -336,20 +339,33 @@ def analyze():
                 precursor_mass_param = pm_val
     except (ValueError, TypeError):
         pass
-    fname = file.filename or "upload.xlsx"
-    if not fname.lower().endswith((".xlsx", ".xls")):
+    fname = (file.filename if file else None) or request.form.get("filename", "upload.xlsx")
+    if file is not None and not fname.lower().endswith((".xlsx", ".xls")):
         return jsonify({"detail": "Expected an Excel (.xlsx) file"}), 400
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # ── 1. Save + parse ───────────────────────────────────────────────
-        fpath = os.path.join(tmpdir, fname)
-        file.save(fpath)
-        try:
-            df = load_data(fpath)
-            df = assign_blocks(df)
-            df = compute_relative_intensity(df)
-        except Exception as exc:
-            return jsonify({"detail": f"Cannot parse Excel file: {exc}"}), 422
+        if data_json_str is not None:
+            # Pre-parsed JSON path (large file, sent by frontend SheetJS parser)
+            try:
+                rows = json.loads(data_json_str)
+                df = pd.DataFrame(rows)
+                for c in ["M", "I", "T"]:
+                    df[c] = pd.to_numeric(df[c], errors="coerce")
+                df = df[["M", "I", "T"]].dropna().reset_index(drop=True)
+                df = assign_blocks(df)
+                df = compute_relative_intensity(df)
+            except Exception as exc:
+                return jsonify({"detail": f"Cannot parse data: {exc}"}), 422
+        else:
+            fpath = os.path.join(tmpdir, fname)
+            file.save(fpath)
+            try:
+                df = load_data(fpath)
+                df = assign_blocks(df)
+                df = compute_relative_intensity(df)
+            except Exception as exc:
+                return jsonify({"detail": f"Cannot parse Excel file: {exc}"}), 422
 
         n_original = len(df)
 
