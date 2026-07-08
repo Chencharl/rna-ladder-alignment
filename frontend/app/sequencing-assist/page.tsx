@@ -29,7 +29,7 @@ import type {
   PipelineParams,
   TRNARefLibrary,
 } from "./lib/api";
-import { runPipeline, downloadResultsUrl, analyzeFile, IS_VERCEL_MODE } from "./lib/api";
+import { runPipeline, downloadResultsUrl, analyzeFile, IS_VERCEL_MODE, LARGE_FILE_THRESHOLD_BYTES } from "./lib/api";
 import type {
   BaseCallingReport,
   TopParallelRow,
@@ -39,7 +39,7 @@ import type {
   RefComparison,
 } from "./lib/types";
 
-type Phase = "idle" | "excel_loaded" | "pipeline_running" | "pipeline_complete";
+type Phase = "idle" | "excel_loaded" | "parsing_large_file" | "pipeline_running" | "pipeline_complete";
 
 export default function SequencingAssist() {
   const [phase, setPhase] = useState<Phase>("idle");
@@ -158,10 +158,16 @@ export default function SequencingAssist() {
 
   async function handleRunAnalysis() {
     if (!selectedFile) return;
-    setPhase("pipeline_running");
+    const isLargeFile = selectedFile.size > LARGE_FILE_THRESHOLD_BYTES;
+    setPhase(isLargeFile ? "parsing_large_file" : "pipeline_running");
     setPipelineError(null);
     try {
-      const result = await analyzeFile(selectedFile, referenceSequence, pipelineParams);
+      const result = await analyzeFile(
+        selectedFile,
+        referenceSequence,
+        pipelineParams,
+        isLargeFile ? () => setPhase("pipeline_running") : undefined,
+      );
       setUploadResult(result);
       applyPipelineResult(result);
       setPhase("pipeline_complete");
@@ -217,7 +223,7 @@ export default function SequencingAssist() {
   // ── Derived state ────────────────────────────────────────────────────────
 
   const hasResults = !!(report || topParallel || decisions);
-  const isRunning = phase === "pipeline_running";
+  const isRunning = phase === "pipeline_running" || phase === "parsing_large_file";
 
   useEffect(() => {
     if (isRunning) {
@@ -454,21 +460,27 @@ export default function SequencingAssist() {
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
                     </svg>
                     <p className="text-sm font-semibold text-blue-800 animate-pulse">
-                      {PROGRESS_STAGES[progressStage]}
+                      {phase === "parsing_large_file"
+                        ? `Parsing ${selectedFile ? (selectedFile.size / 1024 / 1024).toFixed(1) : ""}  MB file locally — extracting M/I/T columns…`
+                        : PROGRESS_STAGES[progressStage]}
                     </p>
                   </div>
-                  <div className="flex gap-1">
-                    {PROGRESS_STAGES.map((_, i) => (
-                      <div
-                        key={i}
-                        className={`h-1 flex-1 rounded-full transition-colors duration-500 ${
-                          i <= progressStage ? "bg-blue-500" : "bg-blue-200"
-                        }`}
-                      />
-                    ))}
-                  </div>
+                  {phase === "pipeline_running" && (
+                    <div className="flex gap-1">
+                      {PROGRESS_STAGES.map((_, i) => (
+                        <div
+                          key={i}
+                          className={`h-1 flex-1 rounded-full transition-colors duration-500 ${
+                            i <= progressStage ? "bg-blue-500" : "bg-blue-200"
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  )}
                   <p className="text-xs text-gray-400 mt-2">
-                    Large files may take 30–60 s on first run.
+                    {phase === "parsing_large_file"
+                      ? "File is read locally in your browser — nothing is uploaded yet."
+                      : "Large files may take 30–60 s on first run."}
                   </p>
                 </div>
               )}
