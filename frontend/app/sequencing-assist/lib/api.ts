@@ -57,6 +57,8 @@ export interface ModCount {
 
 export interface PipelineResponse {
   report: Record<string, unknown>;
+  reference_comparisons?: Record<string, import("./types").RefComparison> | null;
+  reference_sequence_used?: string | null;
   top_parallel_reads_long: Record<string, unknown>[] | null;
   sequencing_decision_summary: Record<string, unknown>[] | null;
   classification_evidence: Record<string, unknown>[] | null;

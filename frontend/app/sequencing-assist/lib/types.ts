@@ -157,6 +157,20 @@ export interface PeakStatusRow {
   role: string;
 }
 
+// Reference alignment result for one read vs. the provided reference sequence.
+export interface RefMismatch {
+  position: number; // 0-indexed position in the global alignment
+  read: string;     // what the chain called at this position
+  reference: string; // what the reference has here
+}
+
+export interface RefComparison {
+  aligned_read: string[];       // chain calls with gap characters ("-")
+  aligned_reference: string[]; // reference with gap characters ("-")
+  mismatches: RefMismatch[];
+  identity: number; // 0..1
+}
+
 // The set of files the dashboard recognizes by filename. Everything is
 // loaded client-side from files the user already has on disk (the pipeline's
 // own output folder) -- nothing is computed or re-run here.

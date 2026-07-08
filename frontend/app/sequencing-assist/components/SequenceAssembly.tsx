@@ -1,6 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
-import type { TopParallelRow } from "../lib/types";
+import type { TopParallelRow, RefComparison } from "../lib/types";
 import { Card, ConfidenceChip, EmptyState, LadderChip } from "./ui";
 
 // ─── Residue token styling ────────────────────────────────────────────────────
@@ -77,11 +77,53 @@ interface ChainStripProps {
   chain: AssembledChain;
   is5prime: boolean;
   partnerLabel?: string;
+  refComp?: RefComparison | null;
   copied: boolean;
   onCopy: () => void;
 }
 
-function ChainStrip({ chain, is5prime, partnerLabel, copied, onCopy }: ChainStripProps) {
+function RefAlignmentRow({ refComp, is5prime }: { refComp: RefComparison; is5prime: boolean }) {
+  const [open, setOpen] = useState(false);
+  const identity = Math.round(refComp.identity * 100);
+  const n = refComp.mismatches.length;
+  // For 3' chain the algorithm aligned in 3'→5' order; note this in the display.
+  const orderNote = is5prime ? "" : " (3′→5′ read order)";
+  return (
+    <div className="mt-2 border-t border-gray-100 pt-2">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1"
+      >
+        {open ? "▲" : "▼"}
+        {" "}Reference alignment: <span className={`font-semibold ${identity >= 80 ? "text-green-600" : identity >= 60 ? "text-amber-600" : "text-red-600"}`}>{identity}% identity</span>
+        {n > 0 && <span className="text-gray-400">· {n} mismatch{n > 1 ? "es" : ""} (candidate modification sites)</span>}
+        {n === 0 && <span className="text-green-600">· all positions match{orderNote}</span>}
+      </button>
+      {open && (
+        <div className="mt-1.5 text-xs space-y-0.5">
+          {n === 0 ? (
+            <p className="text-green-600 italic">No mismatches — recovered sequence matches reference exactly{orderNote}.</p>
+          ) : (
+            <>
+              {n > 0 && <p className="text-gray-400 italic mb-1">Mismatched positions are candidate sites for RNA modifications, editing, or isoforms{orderNote}:</p>}
+              {refComp.mismatches.map((mm, i) => (
+                <div key={i} className="flex items-center gap-2 pl-1">
+                  <span className="text-gray-400 tabular-nums w-12">pos {mm.position}</span>
+                  <span className="font-mono px-1 py-0.5 rounded bg-amber-100 border border-amber-300 text-amber-800">{mm.read}</span>
+                  <span className="text-gray-400">vs ref</span>
+                  <span className="font-mono px-1 py-0.5 rounded bg-blue-50 border border-blue-200 text-blue-700">{mm.reference}</span>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChainStrip({ chain, is5prime, partnerLabel, refComp, copied, onCopy }: ChainStripProps) {
   const accent = is5prime ? "blue" : "purple";
   const containerCls = `rounded-lg border p-3 ${
     is5prime ? "bg-blue-50 border-blue-100" : "bg-purple-50 border-purple-100"
@@ -143,13 +185,22 @@ function ChainStrip({ chain, is5prime, partnerLabel, copied, onCopy }: ChainStri
           )}
         </p>
       )}
+
+      {/* Reference comparison — only shown when reference was provided */}
+      {refComp && <RefAlignmentRow refComp={refComp} is5prime={is5prime} />}
     </div>
   );
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function SequenceAssembly({ rows }: { rows: TopParallelRow[] | null }) {
+export function SequenceAssembly({
+  rows,
+  refComparisons,
+}: {
+  rows: TopParallelRow[] | null;
+  refComparisons?: Record<string, RefComparison> | null;
+}) {
   const [copied5, setCopied5] = useState(false);
   const [copied3, setCopied3] = useState(false);
 
@@ -241,6 +292,7 @@ export function SequenceAssembly({ rows }: { rows: TopParallelRow[] | null }) {
                   ? `Paired partner: Read #${chain3.rank}`
                   : undefined
               }
+              refComp={refComparisons?.[String(chain5.rank)] ?? null}
               copied={copied5}
               onCopy={() => {
                 copy(seqText(chain5.steps), () => {
@@ -264,6 +316,7 @@ export function SequenceAssembly({ rows }: { rows: TopParallelRow[] | null }) {
                   ? `Paired partner: Read #${chain5.rank}`
                   : undefined
               }
+              refComp={refComparisons?.[String(chain3.rank)] ?? null}
               copied={copied3}
               onCopy={() => {
                 copy(seqText(chain3.steps), () => {

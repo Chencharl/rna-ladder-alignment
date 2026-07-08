@@ -497,6 +497,29 @@ def analyze():
         except Exception:
             top_parallel = _read_csv("top_parallel_reads_long_csv")
 
+        # ── 11c. Reference comparisons for top reads ─────────────────────
+        # When the user provided a reference, the algorithm aligns every
+        # chain against it.  Extract per-rank comparison data only for
+        # reads that appear in the top_parallel table so the payload stays
+        # small (342 full alignments would be expensive on large runs).
+        top_read_ranks = {
+            int(r["read_rank"]) for r in (top_parallel or [])
+            if r.get("read_rank") is not None
+        }
+        ref_comparison_map: dict = {}
+        if ref_tokens:
+            for comp in report.get("reference_comparisons", []) or []:
+                ci = comp.get("chain_index")
+                if ci is not None and 0 <= ci < len(chains_list):
+                    rk = chains_list[ci].get("read_rank")
+                    if rk is not None and int(rk) in top_read_ranks:
+                        ref_comparison_map[str(int(rk))] = _sanitize({
+                            "aligned_read": list(comp.get("aligned_read", [])),
+                            "aligned_reference": list(comp.get("aligned_reference", [])),
+                            "mismatches": list(comp.get("mismatches", [])),
+                            "identity": round(float(comp.get("identity", 0.0)), 4),
+                        })
+
         # ── 11b. Build report summary + modification counts ──────────────
         # Derive read-call and peak-usage counts from the CSV data so the
         # RunOverview component has structured stats without needing a separate
@@ -646,7 +669,8 @@ def analyze():
             "was_subsampled": was_subsampled,
             "n_original_points": n_original,
             "n_pipeline_points": len(df_pipeline),
-            "reference_comparisons": None,
+            "reference_comparisons": ref_comparison_map or None,
+            "reference_sequence_used": "".join(ref_tokens) if ref_tokens else None,
             # Excel download (base64 encoded)
             "excel_b64": excel_b64,
         }

@@ -34,6 +34,7 @@ import type {
   DecisionRow,
   ClassificationEvidenceRow,
   PeakStatusRow,
+  RefComparison,
 } from "./lib/types";
 
 type Phase = "idle" | "excel_loaded" | "pipeline_running" | "pipeline_complete";
@@ -71,6 +72,7 @@ export default function SequencingAssist() {
     nChainsTotal: number; nChainsMin10: number; minChainLenShown: number;
   } | null>(null);
   const [selectedReadRank, setSelectedReadRank] = useState<number | null>(null);
+  const [refComparisons, setRefComparisons] = useState<Record<string, RefComparison> | null>(null);
   const [referenceSequence, setReferenceSequence] = useState("");
   const [progressStage, setProgressStage] = useState(0);
   const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -109,6 +111,7 @@ export default function SequencingAssist() {
     setSigmoidPost(null);
     setPipelineMeta(null);
     setSelectedReadRank(null);
+    setRefComparisons(null);
     setExcelB64(null);
   }
 
@@ -134,6 +137,7 @@ export default function SequencingAssist() {
       nChainsMin10: result.n_chains_min_10 ?? 0,
       minChainLenShown: result.min_chain_len_shown ?? 10,
     });
+    setRefComparisons((result as any).reference_comparisons ?? null);
     setSelectedReadRank(null);
   }
 
@@ -638,7 +642,7 @@ export default function SequencingAssist() {
 
           {/* Primary output — decoded sequence from best 5′ and 3′ reads */}
           {hasResults && (
-            <SequenceAssembly rows={topParallel} />
+            <SequenceAssembly rows={topParallel} refComparisons={refComparisons} />
           )}
 
           {/* Core view 1 — Rel_I scatter */}
