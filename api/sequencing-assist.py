@@ -308,6 +308,11 @@ def analyze():
                 min_rt_history=3,
                 precursor_mass=precursor_mass_param,
                 allowed_masses=dict(_RESIDUE_MASS),
+                # Strict single-residue steps only: every chain edge must
+                # correspond to exactly one observed mass difference matching
+                # a known residue within _CHAIN_TOL. max_residues_per_step>1
+                # allows multi-residue gap jumps that produce misleading calls.
+                max_residues_per_step=1,
             )
             result = _run_nested_pipeline(
                 df=df_pipeline, out_dir=out_dir, reference=ref_tokens, cfg=algo_cfg

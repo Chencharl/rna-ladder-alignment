@@ -7,24 +7,33 @@ import { Card, ConfidenceChip, EmptyState, LadderChip } from "./ui";
 
 const CANONICAL = new Set(["A", "U", "G", "C"]);
 
-// Near-isobaric or formally isobaric pairs — mass alone cannot distinguish them
-const ISOBARIC = new Set([
+// Formal isobaric pairs — single dictionary entries that represent two
+// indistinguishable modifications at this mass precision.
+// Any call containing "/" (including runtime near-isobaric ambiguities)
+// is also treated as amber regardless of whether it's in this set.
+const ISOBARIC_KEYS = new Set([
   "Um/m1Ψ", "s2U/s4U", "m5C/Cm", "mA/Am", "mG/Gm", "manQ/galQ",
-  "mo5U", "m5s2U", "mcm5s2U", "mchm5U",
 ]);
+
+function isAmbiguous(call: string): boolean {
+  // A "/" in the call means either a formal isobaric dictionary key or a
+  // runtime tie between two residues within the 0.05 Da tolerance — either
+  // way the position cannot be resolved by mass alone.
+  return ISOBARIC_KEYS.has(call) || call.includes("/");
+}
 
 function tokenStyle(call: string): string {
   const base = "inline-block px-1.5 py-0.5 rounded text-xs font-mono border leading-none cursor-default shrink-0";
   if (call.startsWith("?"))  return `${base} bg-gray-100 text-gray-500 border-gray-300`;
-  if (ISOBARIC.has(call))   return `${base} bg-amber-100 text-amber-800 border-amber-300`;
-  if (CANONICAL.has(call))  return `${base} bg-blue-50 text-blue-800 border-blue-200`;
+  if (isAmbiguous(call))     return `${base} bg-amber-100 text-amber-800 border-amber-300`;
+  if (CANONICAL.has(call))   return `${base} bg-blue-50 text-blue-800 border-blue-200`;
   return `${base} bg-purple-50 text-purple-800 border-purple-200`;
 }
 
 function tokenTitle(call: string, mass: number): string {
   if (call.startsWith("?")) return `Unresolved — Δmass = ${mass.toFixed(2)} Da (not in modification dictionary)`;
-  if (ISOBARIC.has(call))  return `Isobaric pair — cannot distinguish ${call} by mass alone; orthogonal validation required`;
-  if (CANONICAL.has(call)) return call;
+  if (isAmbiguous(call))    return `Mass-ambiguous — cannot distinguish ${call} by mass alone; orthogonal validation (e.g. CMC, metabolic labeling) required`;
+  if (CANONICAL.has(call))  return call;
   return `Modified: ${call}`;
 }
 
