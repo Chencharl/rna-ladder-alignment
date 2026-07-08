@@ -14,7 +14,8 @@
     "plotly.js-basic-dist-min": "^3.6.0",
     "react": "^18",
     "react-dom": "^18",
-    "react-plotly.js": "^4.0.0"
+    "react-plotly.js": "^4.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^20",

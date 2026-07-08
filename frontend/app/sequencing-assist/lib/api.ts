@@ -177,6 +177,53 @@ export interface EmpiricalFDR {
   interpretation: string;        // human-readable summary
 }
 
+// Vercel serverless functions have a ~4.5 MB request body limit.
+// Files larger than this threshold are parsed client-side with SheetJS and
+// sent as a JSON array of {M, I, T} rows instead of the raw binary file.
+const LARGE_FILE_THRESHOLD_BYTES = 3.5 * 1024 * 1024;
+
+// Column-name sets that mirror load_data() in api/sequencing-assist.py
+const M_NAMES = new Set(["m", "mass", "molecular weight", "mw", "deconv mass",
+  "average mass", "monoisotopic mass", "mono mass"]);
+const I_NAMES = new Set(["i", "intensity", "sum intensity", "peak intensity",
+  "signal", "area", "height", "relative intensity"]);
+const T_NAMES = new Set(["t", "rt", "retention time", "time", "apex rt",
+  "apex retention time", "retention time (min)"]);
+
+async function parseExcelToRows(file: File): Promise<{ M: number; I: number; T: number }[]> {
+  const { read, utils } = await import("xlsx");
+  const buffer = await file.arrayBuffer();
+  const wb = read(buffer, { type: "array" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null });
+  if (rows.length === 0) throw new Error("Spreadsheet appears empty");
+
+  const colKeys = Object.keys(rows[0]);
+  let mCol = "", iCol = "", tCol = "";
+  for (const col of colKeys) {
+    const lc = col.toLowerCase().trim();
+    if (!mCol && M_NAMES.has(lc)) mCol = col;
+    else if (!iCol && I_NAMES.has(lc)) iCol = col;
+    else if (!tCol && T_NAMES.has(lc)) tCol = col;
+  }
+  // Fallback: positional assignment (same as load_data fallback)
+  if (!mCol) mCol = colKeys[0] ?? "";
+  if (!iCol) iCol = colKeys[1] ?? "";
+  if (!tCol) tCol = colKeys[2] ?? "";
+  if (!mCol || !iCol || !tCol) throw new Error("Cannot detect M/I/T columns in this file");
+
+  const result: { M: number; I: number; T: number }[] = [];
+  for (const row of rows) {
+    const M = Number(row[mCol]);
+    const I = Number(row[iCol]);
+    const T = Number(row[tCol]);
+    if (isFinite(M) && M > 0 && isFinite(I) && I >= 0 && isFinite(T) && T >= 0) {
+      result.push({ M, I, T });
+    }
+  }
+  return result;
+}
+
 // Single-phase endpoint used on Vercel: upload + full pipeline in one request.
 export async function analyzeFile(
   file: File,
@@ -184,12 +231,21 @@ export async function analyzeFile(
   params: PipelineParams = {},
 ): Promise<AnalyzeResponse> {
   const form = new FormData();
-  form.append("file", file);
   if (referenceSequence.trim()) form.append("reference_sequence", referenceSequence.trim());
   if (params.minChainLen != null) form.append("min_chain_len", String(params.minChainLen));
   if (params.topNChains != null) form.append("top_n_chains", String(params.topNChains));
   if (params.minRelI != null) form.append("min_rel_i", String(params.minRelI));
   if (params.precursorMass != null && params.precursorMass > 0) form.append("precursor_mass", String(params.precursorMass));
+
+  if (file.size > LARGE_FILE_THRESHOLD_BYTES) {
+    // Parse Excel client-side to stay under Vercel's 4.5 MB body limit
+    const rows = await parseExcelToRows(file);
+    form.append("data_json", JSON.stringify(rows));
+    form.append("filename", file.name);
+  } else {
+    form.append("file", file);
+  }
+
   const res = await fetch("/api/sequencing-assist", {
     method: "POST",
     body: form,

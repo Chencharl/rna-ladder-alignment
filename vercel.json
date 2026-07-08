@@ -7,6 +7,7 @@
   "functions": {
     "api/sequencing-assist.py": {
       "memory": 1024,
+      "maxDuration": 60,
       "includeFiles": "trna_nested_algorithm.py|api/trna_reference.py"
     }
   }
