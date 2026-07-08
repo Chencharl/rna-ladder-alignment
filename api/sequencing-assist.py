@@ -39,11 +39,74 @@ from trna_nested_algorithm import (  # noqa: E402
     build_read_summary as _build_read_summary,
     build_top_parallel_reads_long as _build_top_parallel_long,
     compare_to_reference as _compare_to_reference,
+    _flatten_labels,
 )
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 PRE_SUB_LIMIT = 20_000
 PIPELINE_POINT_LIMIT = 8_000
+
+# ── tRNA reference mapping ─────────────────────────────────────────────────────
+# Theoretical RNA ladder mass terminus constants validated against Dr. Jiang's
+# JavaScript implementation (tRNA_suite_v1_update.html).
+# 5' ladder fragments (5'-phosphate terminus): mass = _MASS_START_5P + Σresidues
+# 3' ladder fragments (5'-OH terminus):        mass = _MASS_START_3P + Σresidues
+_MASS_START_5P = 97.9769
+_MASS_START_3P = -61.9558
+
+# Symbol-to-mass for every modification symbol found in 46_tRNA_iso.xlsx Sheet1.
+# Isobaric modifications map to the same mass (indistinguishable by mass alone).
+_REF_SYMBOL_MASS: dict[str, float] = {
+    # Canonical
+    "A": 329.05252, "C": 305.04129, "G": 345.04743, "U": 306.02530,
+    # Uridine modifications
+    "D": 308.04095,       # dihydrouridine
+    "T": 320.04095,       # ribothymidine (5-methyluridine, m5U)
+    "Um": 320.04095,      # 2'-O-methyluridine (isobaric with T/m5U)
+    "m3U": 320.04095,     # 3-methyluridine (isobaric with Um)
+    "m5Um": 334.05660,    # 5,2'-O-dimethyluridine
+    "mnm5U": 349.06750,   # 5-methylaminomethyluridine
+    "ncm5U": 363.04677,   # 5-carbamoylmethyluridine
+    "mcm5U": 378.04643,   # 5-methoxycarbonylmethyluridine
+    "mchm5U": 394.04135,  # 5-(carboxyhydroxymethyl)uridine methyl ester
+    "acp3U": 407.07298,   # 3-(3-amino-3-carboxypropyl)uridine
+    # Cytidine modifications
+    "m5C": 319.05694,     # 5-methylcytidine
+    "Cm": 319.05694,      # 2'-O-methylcytidine (isobaric with m5C)
+    "m3C": 319.05694,     # 3-methylcytidine (isobaric with m5C)
+    "ac4C": 347.05185,    # N4-acetylcytidine
+    "f5C": 333.03620,     # 5-formylcytidine
+    "f5Cm": 347.05185,    # 5-formyl-2'-O-methylcytidine (isobaric with ac4C)
+    "hm5C": 335.05238,    # 5-hydroxymethylcytidine
+    # Adenosine modifications
+    "m1A": 343.06817,     # 1-methyladenosine (same mass class as mA/Am)
+    "m6Am": 357.08382,    # N6,2'-O-dimethyladenosine
+    "I": 330.03654,       # inosine
+    "m1I": 344.05200,     # 1-methylinosine
+    "i6A": 397.11512,     # N6-isopentenyladenosine
+    "ms2i6A": 443.10284,  # 2-methylthio-N6-isopentenyladenosine
+    "t6A": 474.09003,     # N6-threonylcarbamoyladenosine
+    # Guanosine modifications
+    "m1G": 359.06308,     # 1-methylguanosine
+    "m2G": 359.06308,     # N2-methylguanosine (isobaric with m1G)
+    "m7G": 359.06308,     # 7-methylguanosine (isobaric with m1G)
+    "Gm": 359.06308,      # 2'-O-methylguanosine (isobaric with m1G)
+    "m22G": 373.07873,    # N2,N2-dimethylguanosine
+    "Q": 471.11551,       # queuosine
+}
+
+# Canonical path search order for the reference file (local dev vs Vercel bundle)
+_TRNA_REF_SEARCH_PATHS = [
+    os.path.join(_FUNC_DIR, "data", "46_tRNA_iso.xlsx"),
+    os.path.join(_REPO_ROOT, "data", "46_tRNA_iso.xlsx"),
+    # Developer local path (populated only on the original developer machine)
+    os.path.join(
+        os.path.expanduser("~"),
+        "Downloads", "01_UAlbany_RNA_LCMS",
+        "01_Active_Ladder_LCMS_Sequencing",
+        "SUNY_from_Downloads", "TRNA", "46_tRNA_iso.xlsx",
+    ),
+]
 
 # Full modification dictionary (from project reference, dictonary.csv).
 # Isobaric pairs are merged under the most biologically common label; the
@@ -110,6 +173,113 @@ _CHAIN_TOL = 0.05
 # Chain building is already done; 0.07 Da gives a small margin for rounding
 # when labeling a step that was already accepted at 0.05 Da.
 _DECODE_TOL = 0.07
+
+# ── tRNA reference pre-mapping helpers ────────────────────────────────────────
+
+def _trna_sequences_from_module() -> dict[str, list[str]]:
+    """Load tRNA sequences from the embedded Python module (primary source, always available)."""
+    try:
+        import trna_reference as _ref
+        return _ref.TRNA_SEQUENCES
+    except ImportError:
+        return {}
+
+
+def _trna_sequences_from_xlsx() -> dict[str, list[str]]:
+    """Load tRNA sequences from 46_tRNA_iso.xlsx (fallback for local development)."""
+    ref_path = None
+    for candidate in _TRNA_REF_SEARCH_PATHS:
+        if os.path.isfile(candidate):
+            ref_path = candidate
+            break
+    if ref_path is None:
+        return {}
+    try:
+        df_ref = pd.read_excel(ref_path, sheet_name=0, header=0, index_col=0)
+    except Exception:
+        return {}
+    seqs: dict[str, list[str]] = {}
+    for _, row in df_ref.iterrows():
+        name = row.get("Anticodon", "")
+        if not isinstance(name, str):
+            continue
+        if any(name.startswith(pfx) for pfx in ("covered", "not covered")):
+            continue
+        seq = [str(v) for v in row[1:] if isinstance(v, str) and str(v) in _REF_SYMBOL_MASS]
+        if len(seq) >= 5:
+            seqs[name] = seq
+    return seqs
+
+
+def _load_tRNA_theoretical_masses() -> list[float]:
+    """
+    Compute all theoretical 5' and 3' ladder fragment masses for the 46 human
+    tRNA families using Dr. Jiang's validated terminus constants.  Returns a
+    sorted list in the 2,000–23,000 Da analysis window.
+
+    Uses the embedded trna_reference.py module (deployed to Vercel), falling
+    back to the 46_tRNA_iso.xlsx file for local development.  Returns an empty
+    list if neither source is available.
+    """
+    sequences = _trna_sequences_from_module()
+    if not sequences:
+        sequences = _trna_sequences_from_xlsx()
+    if not sequences:
+        return []
+
+    masses: list[float] = []
+    for seq in sequences.values():
+        residues = [_REF_SYMBOL_MASS[s] for s in seq if s in _REF_SYMBOL_MASS]
+        if len(residues) < 5:
+            continue
+        n = len(residues)
+        # 5' ladder: START_5P + Σ residues[0:k]  for k=1..n
+        cumsum = 0.0
+        for r in residues:
+            cumsum += r
+            m = _MASS_START_5P + cumsum
+            if 2_000.0 <= m <= 23_000.0:
+                masses.append(m)
+        # 3' ladder: START_3P + Σ residues[n-k:n]  for k=1..n (3'→5' walk)
+        cumsum = 0.0
+        for r in reversed(residues):
+            cumsum += r
+            m = _MASS_START_3P + cumsum
+            if 2_000.0 <= m <= 23_000.0:
+                masses.append(m)
+
+    return sorted(set(round(m, 4) for m in masses))
+
+
+def _annotate_reference_matches(
+    df_pipeline: "pd.DataFrame",
+    theoretical_masses: list[float],
+) -> tuple["pd.DataFrame", int]:
+    """
+    Add a boolean column 'ref_matched' to df_pipeline.  A peak is marked matched
+    if its mass is within 10 PPM (minimum 0.05 Da) of any theoretical ladder mass.
+    Returns (annotated_df, n_matched).
+    """
+    if not theoretical_masses or len(df_pipeline) == 0:
+        df_pipeline = df_pipeline.copy()
+        df_pipeline["ref_matched"] = False
+        return df_pipeline, 0
+
+    theory_arr = np.array(theoretical_masses)
+    data_masses = df_pipeline["M"].values
+    matched = np.zeros(len(data_masses), dtype=bool)
+
+    for i, dm in enumerate(data_masses):
+        tol = max(0.05, dm * 10e-6)  # 10 PPM, minimum 0.05 Da
+        lo = np.searchsorted(theory_arr, dm - tol)
+        hi = np.searchsorted(theory_arr, dm + tol, side="right")
+        if hi > lo:
+            matched[i] = True
+
+    df_out = df_pipeline.copy()
+    df_out["ref_matched"] = matched
+    return df_out, int(matched.sum())
+
 
 # ── Flask app ──────────────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -279,47 +449,40 @@ def analyze():
             # No peaks survived filtering — likely intact data; run on unfiltered mass range
             df_pipeline = df
 
-        # ── 6. Reference tokens ───────────────────────────────────────────
+        # ── 6. Reference tokens (user-provided single-sequence alignment) ────
         ref_tokens = None
         if ref_seq:
             toks = [c for c in ref_seq.upper().replace("T", "U") if c in "AUGC"]
             if toks:
                 ref_tokens = toks
 
+        # ── 6b. tRNA reference library pre-mapping ────────────────────────
+        # Load theoretical 5'/3' ladder masses for all 46 human tRNA families
+        # and annotate each peak.  Reported in the response so the user can judge
+        # how much of the data is accounted for by known tRNA sequences.
+        tRNA_theoretical_masses = _load_tRNA_theoretical_masses()
+        n_ref_theoretical = len(tRNA_theoretical_masses)
+        df_pipeline, n_ref_matched = _annotate_reference_matches(
+            df_pipeline, tRNA_theoretical_masses
+        )
+        ref_library_loaded = n_ref_theoretical > 0
+
         # ── 7. Run pipeline ───────────────────────────────────────────────
         out_dir = os.path.join(tmpdir, "output")
         os.makedirs(out_dir, exist_ok=True)
         try:
-            # Parameters matched to the reference spreadsheet:
-            #   mass_tol=0.05 Da  — spreadsheet col L; default is 0.02 (too strict)
-            #   rt_std_floor=0.30 — real LC-MS RT steps vary 0.3–1.0 min between
-            #     ladder positions; the 0.02 default gives ±0.05 min tolerance for
-            #     early chains (just 2 points), which cuts chains at 3 peaks instead
-            #     of 15+. 0.30 keeps the trend check meaningful without being punishing.
-            #   min_rt_history=3  — require 3 RT points (2 deltas) before applying
-            #     the trend filter, matching the "Check RT" logic in the spreadsheet
-            #     which implicitly needs 2 consecutive steps to establish a direction.
-            # Pass the full modification dictionary so the chain builder can
-            # extend through all 47 known modifications — the algorithm's
-            # DEFAULT_ALLOWED_MASSES only covers ~30 entries and would miss
-            # tm5U, acp3U, manQ/galQ, archaeosine, ms2t6A, Ar(p), etc.
+            # rt_std_floor=0.10: per-step RT tolerance ±0.25 min.
+            # The previous value of 0.30 (±0.75 min/step) allowed 40-step chains
+            # to drift 15+ min across the full HPLC run, producing false cross-tRNA
+            # connections in bulk data.  0.10 still tolerates natural ladder RT
+            # variation (typically 0.05–0.20 min/step) while preventing artifacts.
+            # max_residues_per_step=3 is Dr. Jiang's strict default; never set to 1.
             algo_cfg = _AlgoConfig(
                 mass_tol=_CHAIN_TOL,
-                # rt_std_floor=0.30 is empirically larger than the Config
-                # default (0.02 min) to tolerate the natural RT drift seen in
-                # deconvoluted LC-MS data.  min_rt_history=3 requires at least
-                # 3 confirmed steps before the RT trend filter activates.
-                rt_std_floor=0.30,
+                rt_std_floor=0.10,
                 min_rt_history=3,
                 precursor_mass=precursor_mass_param,
                 allowed_masses=dict(_RESIDUE_MASS),
-                # max_residues_per_step=3 is Dr. Jiang's strict default:
-                # each greedy extension step may span up to 3 residue masses,
-                # which allows chains to bridge up to 2 missing ladder rungs
-                # (max_missing_positions = max_residues_per_step - 1 = 2).
-                # Do NOT set to 1 — that breaks gap-tolerance and deviates
-                # from the published method.  Use exploratory_mode=True
-                # (max_residues_per_step=4) only for noisy / low-coverage data.
                 max_residues_per_step=3,
             )
             result = _run_nested_pipeline(
@@ -522,30 +685,25 @@ def analyze():
                     chain_meta = chains_list[ci]
                     rk = chain_meta.get("read_rank")
                     if rk is not None and int(rk) in top_read_ranks:
-                        # 3' chains have sequence_calls in 3'→5' order; reverse
-                        # before aligning against the 5'→3' reference so that
-                        # identity and mismatch positions are orientation-correct.
-                        # Raw chain dicts use "ladder_type" = "likely_3prime".
+                        # Use _flatten_labels so gap steps ("A/G/C" in sequence_calls)
+                        # are expanded into individual residues ["A","G","C"] before
+                        # global alignment — otherwise "/" tokens never match the reference.
+                        # Isobaric pairs like ("Um/m1Ψ",) remain single tokens (correct).
+                        flat_calls = _flatten_labels(chain_meta.get("edge_labels", []))
+                        # 3' chains walk 3'→5'; reverse before aligning against the
+                        # 5'→3' reference so identity and mismatch positions are correct.
                         ladder_type = str(chain_meta.get("ladder_type", "")).lower()
                         is_3prime = "3prime" in ladder_type
                         if is_3prime:
-                            calls = list(chain_meta.get("sequence_calls", []))
-                            corrected = _compare_to_reference(list(reversed(calls)), ref_tokens)
-                            ref_comparison_map[str(int(rk))] = _sanitize({
-                                "aligned_read": list(corrected.get("aligned_read", [])),
-                                "aligned_reference": list(corrected.get("aligned_reference", [])),
-                                "mismatches": list(corrected.get("mismatches", [])),
-                                "identity": round(float(corrected.get("identity", 0.0)), 4),
-                                "orientation_corrected": True,
-                            })
-                        else:
-                            ref_comparison_map[str(int(rk))] = _sanitize({
-                                "aligned_read": list(comp.get("aligned_read", [])),
-                                "aligned_reference": list(comp.get("aligned_reference", [])),
-                                "mismatches": list(comp.get("mismatches", [])),
-                                "identity": round(float(comp.get("identity", 0.0)), 4),
-                                "orientation_corrected": False,
-                            })
+                            flat_calls = list(reversed(flat_calls))
+                        corrected = _compare_to_reference(flat_calls, ref_tokens)
+                        ref_comparison_map[str(int(rk))] = _sanitize({
+                            "aligned_read": list(corrected.get("aligned_read", [])),
+                            "aligned_reference": list(corrected.get("aligned_reference", [])),
+                            "mismatches": list(corrected.get("mismatches", [])),
+                            "identity": round(float(corrected.get("identity", 0.0)), 4),
+                            "orientation_corrected": is_3prime,
+                        })
 
         # ── 11b. Build report summary + modification counts ──────────────
         # Derive read-call and peak-usage counts from the CSV data so the
@@ -578,15 +736,24 @@ def analyze():
         ambig_conflict = (
             peak_status_counts["ambiguous_retained"] + peak_status_counts["conflict_retained"]
         )
+        n_pipeline_total = len(df_pipeline)
+        ref_match_pct = round(n_ref_matched / n_pipeline_total * 100, 1) if n_pipeline_total else 0.0
         report_summary = {
             "file_name": fname,
             "runtime_seconds": round(time.time() - _t0, 1),
-            "n_points": len(df_pipeline),
+            "n_points": n_pipeline_total,
             "n_chains": n_chains_total,
             "n_blocks": int(df_pipeline["block"].nunique()),
             "read_call_counts": read_call_counts,
             "peak_status_counts": peak_status_counts,
             "top_parallel_warning": ambig_conflict > max(used_peaks, 1),
+            "tRNA_ref_library": {
+                "loaded": ref_library_loaded,
+                "n_theoretical_masses": n_ref_theoretical,
+                "n_peaks_matched": n_ref_matched,
+                "n_peaks_total": n_pipeline_total,
+                "match_pct": ref_match_pct,
+            },
             "review_summary": {
                 "reads_5prime": read_call_counts["5prime"],
                 "reads_3prime": read_call_counts["3prime"],
@@ -698,6 +865,14 @@ def analyze():
             "n_pipeline_points": len(df_pipeline),
             "reference_comparisons": ref_comparison_map or None,
             "reference_sequence_used": "".join(ref_tokens) if ref_tokens else None,
+            # tRNA reference library statistics
+            "tRNA_ref_library": {
+                "loaded": ref_library_loaded,
+                "n_theoretical_masses": n_ref_theoretical,
+                "n_peaks_matched": n_ref_matched,
+                "n_peaks_total": n_pipeline_total,
+                "match_pct": ref_match_pct,
+            },
             # Excel download (base64 encoded)
             "excel_b64": excel_b64,
         }

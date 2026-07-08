@@ -27,6 +27,7 @@ import type {
   ModCount,
   SigmoidPostPoint,
   PipelineParams,
+  TRNARefLibrary,
 } from "./lib/api";
 import { runPipeline, downloadResultsUrl, analyzeFile, IS_VERCEL_MODE } from "./lib/api";
 import type {
@@ -74,6 +75,7 @@ export default function SequencingAssist() {
   } | null>(null);
   const [selectedReadRank, setSelectedReadRank] = useState<number | null>(null);
   const [refComparisons, setRefComparisons] = useState<Record<string, RefComparison> | null>(null);
+  const [tRNARefLibrary, setTRNARefLibrary] = useState<TRNARefLibrary | null>(null);
   const [referenceSequence, setReferenceSequence] = useState("");
   const [progressStage, setProgressStage] = useState(0);
   const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -113,6 +115,7 @@ export default function SequencingAssist() {
     setPipelineMeta(null);
     setSelectedReadRank(null);
     setRefComparisons(null);
+    setTRNARefLibrary(null);
     setExcelB64(null);
   }
 
@@ -139,6 +142,7 @@ export default function SequencingAssist() {
       minChainLenShown: result.min_chain_len_shown ?? 10,
     });
     setRefComparisons((result as any).reference_comparisons ?? null);
+    setTRNARefLibrary((result as any).tRNA_ref_library ?? null);
     setSelectedReadRank(null);
   }
 
@@ -648,6 +652,7 @@ export default function SequencingAssist() {
               nChainsMin10={pipelineMeta?.nChainsMin10 ?? 0}
               nConflict={(report as any)?.read_call_counts?.conflict ?? 0}
               nAmbiguous={(report as any)?.read_call_counts?.ambiguous ?? 0}
+              tRNARefLibrary={tRNARefLibrary}
             />
           )}
 

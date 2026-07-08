@@ -55,6 +55,14 @@ export interface ModCount {
   is_unknown: boolean;
 }
 
+export interface TRNARefLibrary {
+  loaded: boolean;
+  n_theoretical_masses: number;
+  n_peaks_matched: number;
+  n_peaks_total: number;
+  match_pct: number;
+}
+
 export interface PipelineResponse {
   report: Record<string, unknown>;
   reference_comparisons?: Record<string, import("./types").RefComparison> | null;
@@ -78,6 +86,7 @@ export interface PipelineResponse {
   was_subsampled: boolean;
   n_original_points: number;
   n_pipeline_points: number;
+  tRNA_ref_library?: TRNARefLibrary | null;
 }
 
 export interface SigmoidPostPoint {

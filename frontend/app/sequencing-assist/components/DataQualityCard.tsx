@@ -1,6 +1,6 @@
 "use client";
 
-import type { RtQuality, EmpiricalFDR, CoverageBin } from "../lib/api";
+import type { RtQuality, EmpiricalFDR, CoverageBin, TRNARefLibrary } from "../lib/api";
 
 interface Props {
   rtQuality: RtQuality | null;
@@ -10,6 +10,7 @@ interface Props {
   nChainsMin10: number;
   nConflict?: number;
   nAmbiguous?: number;
+  tRNARefLibrary?: TRNARefLibrary | null;
 }
 
 type QualityLevel = "excellent" | "good" | "marginal" | "poor";
@@ -93,13 +94,16 @@ function MetricRow({ label, value, note, level }: MetricRowProps) {
   );
 }
 
-export function DataQualityCard({ rtQuality, fdr, coverageBins, nChainsTotal, nChainsMin10, nConflict, nAmbiguous }: Props) {
+export function DataQualityCard({ rtQuality, fdr, coverageBins, nChainsTotal, nChainsMin10, nConflict, nAmbiguous, tRNARefLibrary }: Props) {
   const rtLevel: QualityLevel = rtQuality ? gradeToLevel(rtQuality.grade) : "poor";
   const topBin = coverageBins?.find(b => b.label.includes(">10%"));
   const coveragePct = topBin ? topBin.pct : null;
   const fdrAt10 = fdr?.fdr_by_chain_length_pct?.["10"] ?? null;
   const overall = overallLevel(rtLevel, coveragePct, fdrAt10);
   const style = LEVEL_STYLE[overall];
+
+  const refMatchPct = tRNARefLibrary?.loaded ? tRNARefLibrary.match_pct : null;
+  const isBulkLikely = refMatchPct != null && refMatchPct > 5 && refMatchPct < 60;
 
   const issues: string[] = [];
   if (rtQuality && (rtQuality.grade === "marginal" || rtQuality.grade === "flat/poor")) {
@@ -110,6 +114,12 @@ export function DataQualityCard({ rtQuality, fdr, coverageBins, nChainsTotal, nC
   }
   if (nConflict != null && nConflict > 0 && nChainsMin10 > 0 && nConflict / nChainsMin10 > 0.5) {
     issues.push("More than half of reads are unclassified (conflict/ambiguous). Charge 2 data and/or shorter analysis window may improve classification.");
+  }
+  if (isBulkLikely) {
+    issues.push(
+      `${refMatchPct}% of peaks match the 46-family tRNA reference library — consistent with a multi-species mixture. ` +
+      "De-novo reads from bulk data may contain cross-species connections; interpret chains with caution and cross-reference against the reference library."
+    );
   }
 
   return (
@@ -156,6 +166,20 @@ export function DataQualityCard({ rtQuality, fdr, coverageBins, nChainsTotal, nC
           note={nChainsMin10 === 0 ? "try lowering min read length" : undefined}
           level={nChainsMin10 >= 5 ? "excellent" : nChainsMin10 >= 2 ? "good" : nChainsMin10 >= 1 ? "marginal" : "poor"}
         />
+
+        {/* tRNA reference library match */}
+        {tRNARefLibrary?.loaded && (
+          <MetricRow
+            label="tRNA reference library match"
+            value={`${tRNARefLibrary.match_pct}%`}
+            note={`(${tRNARefLibrary.n_peaks_matched} / ${tRNARefLibrary.n_peaks_total} peaks)`}
+            level={
+              tRNARefLibrary.match_pct >= 60 ? "excellent" :
+              tRNARefLibrary.match_pct >= 30 ? "good" :
+              tRNARefLibrary.match_pct >= 10 ? "marginal" : "poor"
+            }
+          />
+        )}
       </div>
 
       {issues.length > 0 && (
