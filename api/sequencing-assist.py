@@ -905,14 +905,28 @@ def _detect_data_type(df):
     frac_over = n_over / n if n else 0.0
     max_mass = float(df["M"].max()) if n > 0 else 0.0
 
-    # Strong indicator: mass range extends well beyond the hydrolysis ladder range
-    if max_mass > 25_000:
+    # Count peaks in the useful hydrolysis ladder range (2–23 kDa)
+    n_in_ladder = int(((df["M"] >= 2000) & (df["M"] <= 23000)).sum()) if n > 0 else 0
+    # Dense ladder coverage: hydrolysis files typically have 2000+ peaks in 2–23 kDa.
+    # 5S/5.8S RNA hydrolysis files (charge 1) can reach 40–50 kDa (full ladder extent)
+    # while still being valid hydrolysis data — don't flag them solely on max mass.
+    dense_ladder = n_in_ladder >= 2000
+
+    if max_mass > 50_000:
+        # Well above hydrolysis range even for long RNA (5S = 38 kDa, 5.8S = 45 kDa)
         reasons.append(
-            f"Maximum mass {max_mass:,.0f} Da exceeds the hydrolysis range (2,000–23,000 Da). "
-            "This file likely contains intact RNA mass data — the ladder algorithm "
-            "only uses the 2,000–23,000 Da region."
+            f"Maximum mass {max_mass:,.0f} Da is far above the hydrolysis range. "
+            "This file likely contains intact RNA. The ladder algorithm only uses "
+            "the 2,000–23,000 Da region."
         )
-    elif frac_over > 0.01:
+    elif max_mass > 25_000 and not dense_ladder:
+        # Elevated max mass with sparse ladder coverage → probably intact RNA
+        reasons.append(
+            f"Maximum mass {max_mass:,.0f} Da exceeds 25,000 Da with only "
+            f"{n_in_ladder:,} peaks in the 2,000–23,000 Da ladder region — "
+            "this file likely contains intact RNA mass data."
+        )
+    elif frac_over > 0.01 and not dense_ladder:
         reasons.append(
             f"{n_over} point(s) ({frac_over * 100:.1f}%) have mass above the "
             f"~{N_BLOCKS * BLOCK_WIDTH_DA:.0f} Da ladder range."
@@ -927,7 +941,9 @@ def _detect_data_type(df):
                 f"Only {used}/{span} blocks in range are populated — "
                 "points look clustered rather than forming a continuous ladder."
             )
-    likely_intact = len(reasons) >= 2 or frac_over > 0.03 or max_mass > 30_000
+    likely_intact = len(reasons) >= 2 or frac_over > 0.03 or max_mass > 50_000 or (
+        max_mass > 25_000 and not dense_ladder
+    )
     return {"likely_intact": likely_intact, "reasons": reasons}
 
 

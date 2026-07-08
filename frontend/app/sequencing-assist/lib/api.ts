@@ -180,7 +180,7 @@ export interface EmpiricalFDR {
 // Vercel serverless functions have a ~4.5 MB request body limit.
 // Files larger than this threshold are parsed client-side with SheetJS and
 // sent as a JSON array of {M, I, T} rows instead of the raw binary file.
-const LARGE_FILE_THRESHOLD_BYTES = 3.5 * 1024 * 1024;
+export const LARGE_FILE_THRESHOLD_BYTES = 3.5 * 1024 * 1024;
 
 // Column-name sets that mirror load_data() in api/sequencing-assist.py
 const M_NAMES = new Set(["m", "mass", "molecular weight", "mw", "deconv mass",
@@ -225,10 +225,13 @@ async function parseExcelToRows(file: File): Promise<{ M: number; I: number; T: 
 }
 
 // Single-phase endpoint used on Vercel: upload + full pipeline in one request.
+// onParsingDone fires after client-side Excel parsing completes but before the
+// server request starts — lets the caller update loading state to "uploading".
 export async function analyzeFile(
   file: File,
   referenceSequence = "",
   params: PipelineParams = {},
+  onParsingDone?: () => void,
 ): Promise<AnalyzeResponse> {
   const form = new FormData();
   if (referenceSequence.trim()) form.append("reference_sequence", referenceSequence.trim());
@@ -240,6 +243,7 @@ export async function analyzeFile(
   if (file.size > LARGE_FILE_THRESHOLD_BYTES) {
     // Parse Excel client-side to stay under Vercel's 4.5 MB body limit
     const rows = await parseExcelToRows(file);
+    onParsingDone?.();
     form.append("data_json", JSON.stringify(rows));
     form.append("filename", file.name);
   } else {
