@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { CoverageByIntensity } from "./components/CoverageByIntensity";
 import { ComparisonPanel } from "./components/ComparisonPanel";
+import { DataQualityCard } from "./components/DataQualityCard";
 import { ExcelUploader } from "./components/ExcelUploader";
 import { MassRTPlot } from "./components/MassRTPlot";
 import { PeakScatterPlot } from "./components/PeakScatterPlot";
@@ -635,6 +636,19 @@ export default function SequencingAssist() {
                 ) : null}
               </div>
             </div>
+          )}
+
+          {/* Data quality assessment — immediate verdict on file suitability */}
+          {hasResults && (
+            <DataQualityCard
+              rtQuality={rtQuality}
+              fdr={empiricalFdr}
+              coverageBins={coverageBins}
+              nChainsTotal={pipelineMeta?.nChainsTotal ?? 0}
+              nChainsMin10={pipelineMeta?.nChainsMin10 ?? 0}
+              nConflict={(report as any)?.read_call_counts?.conflict ?? 0}
+              nAmbiguous={(report as any)?.read_call_counts?.ambiguous ?? 0}
+            />
           )}
 
           {/* Run overview — read call breakdown + peak usage */}

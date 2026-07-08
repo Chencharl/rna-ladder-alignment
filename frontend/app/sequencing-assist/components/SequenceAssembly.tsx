@@ -7,24 +7,33 @@ import { Card, ConfidenceChip, EmptyState, LadderChip } from "./ui";
 
 const CANONICAL = new Set(["A", "U", "G", "C"]);
 
-// Formal isobaric pairs — single dictionary entries that represent two
-// indistinguishable modifications at this mass precision.
-// Any call containing "/" (including runtime near-isobaric ambiguities)
-// is also treated as amber regardless of whether it's in this set.
+// Formal isobaric pairs — single dictionary entries that share a monoisotopic
+// mass and cannot be distinguished without orthogonal chemistry.
 const ISOBARIC_KEYS = new Set([
   "Um/m1Ψ", "s2U/s4U", "m5C/Cm", "mA/Am", "mG/Gm", "manQ/galQ",
 ]);
 
+// A gap step spans >1 residue in a single observed mass difference
+// (intermediate peaks missing from the ladder).  These show "/" but are NOT
+// isobaric — the label lists all inferred residues summed together.
+function isGapStep(call: string): boolean {
+  return call.includes("/") && !ISOBARIC_KEYS.has(call);
+}
+
 function isAmbiguous(call: string): boolean {
-  // A "/" in the call means either a formal isobaric dictionary key or a
-  // runtime tie between two residues within the 0.05 Da tolerance — either
-  // way the position cannot be resolved by mass alone.
-  return ISOBARIC_KEYS.has(call) || call.includes("/");
+  // Isobaric: same mass, two chemical identities — cannot resolve by mass.
+  return ISOBARIC_KEYS.has(call);
+}
+
+// Count inferred components in a gap step (e.g. "A/G/C" → 3)
+function gapStepCount(call: string): number {
+  return call.split("/").length;
 }
 
 function tokenStyle(call: string): string {
   const base = "inline-block px-1.5 py-0.5 rounded text-xs font-mono border leading-none cursor-default shrink-0";
   if (call.startsWith("?"))  return `${base} bg-gray-100 text-gray-500 border-gray-300`;
+  if (isGapStep(call))       return `${base} bg-teal-50 text-teal-700 border-teal-300 border-dashed`;
   if (isAmbiguous(call))     return `${base} bg-amber-100 text-amber-800 border-amber-300`;
   if (CANONICAL.has(call))   return `${base} bg-blue-50 text-blue-800 border-blue-200`;
   return `${base} bg-purple-50 text-purple-800 border-purple-200`;
@@ -37,7 +46,12 @@ function tokenTitle(call: string, delta: number): string {
     ? `, err = ${Math.abs(delta - expected).toFixed(4)} Da`
     : "";
   if (call.startsWith("?")) return `Unresolved — ${obs} (not in modification dictionary)`;
-  if (isAmbiguous(call))    return `Mass-ambiguous — cannot distinguish ${call} by mass alone; ${obs}${errStr}; requires orthogonal validation`;
+  if (isGapStep(call)) {
+    const n = gapStepCount(call);
+    const missing = n - 1;
+    return `Gap step (${missing} missing ladder rung${missing > 1 ? "s" : ""}): combined Δ = ${delta.toFixed(3)} Da, inferred as ${call.split("/").join(" + ")}. Residue order within gap is unknown. Confirm with orthogonal data.`;
+  }
+  if (isAmbiguous(call))    return `Isobaric pair — cannot distinguish ${call} by mass alone; ${obs}${errStr}; requires orthogonal validation`;
   if (CANONICAL.has(call))  return `${call} — ${obs}${errStr}`;
   return `Modified: ${call} — ${obs}${errStr}`;
 }
@@ -162,8 +176,9 @@ function ChainStrip({ chain, is5prime, partnerLabel, refComp, copied, onCopy }: 
   const labelCls = `text-sm font-bold ${is5prime ? "text-blue-700" : "text-purple-700"}`;
   const endCls = `text-xs font-mono font-bold ${is5prime ? "text-blue-600" : "text-purple-600"} shrink-0`;
 
-  const nMods = chain.steps.filter(s => !CANONICAL.has(s.call) && !s.call.startsWith("?")).length;
+  const nMods = chain.steps.filter(s => !CANONICAL.has(s.call) && !s.call.startsWith("?") && !isGapStep(s.call)).length;
   const nUnknown = chain.steps.filter(s => s.call.startsWith("?")).length;
+  const nGaps = chain.steps.filter(s => isGapStep(s.call)).length;
 
   return (
     <div className={containerCls}>
@@ -204,15 +219,17 @@ function ChainStrip({ chain, is5prime, partnerLabel, refComp, copied, onCopy }: 
         <span className={endCls}>{is5prime ? "→…" : "—3′"}</span>
       </div>
 
-      {/* Modification / unknown summary */}
-      {(nMods > 0 || nUnknown > 0) && (
-        <p className="text-xs text-gray-500 mt-1.5">
+      {/* Modification / gap / unknown summary */}
+      {(nMods > 0 || nUnknown > 0 || nGaps > 0) && (
+        <p className="text-xs text-gray-500 mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5">
           {nMods > 0 && (
             <span className="text-purple-700 font-medium">{nMods} modified position{nMods > 1 ? "s" : ""}</span>
           )}
-          {nMods > 0 && nUnknown > 0 && <span className="text-gray-300"> · </span>}
+          {nGaps > 0 && (
+            <span className="text-teal-700 font-medium">{nGaps} gap step{nGaps > 1 ? "s" : ""} (missing rungs)</span>
+          )}
           {nUnknown > 0 && (
-            <span className="text-gray-400">{nUnknown} unresolved (not in dictionary)</span>
+            <span className="text-gray-400">{nUnknown} unresolved</span>
           )}
         </p>
       )}
@@ -305,8 +322,9 @@ export function SequenceAssembly({
       title="Sequence Assembly"
       subtitle={
         "Decoded nucleotide sequence from the highest-confidence 5′ and 3′ ladder reads. " +
-        "Blue = canonical; purple = modified; amber = isobaric pair (requires orthogonal confirmation). " +
-        "3′ read is shown in 5′→3′ reading order (reversed from walk direction)."
+        "Blue = canonical; purple = modified; amber = isobaric pair (orthogonal confirmation required); " +
+        "teal dashed = gap step (1–2 missing ladder rungs, inferred residues, order unknown); " +
+        "grey = unresolved mass. Hover each token for Δ mass and confidence details."
       }
     >
       {!rows ? (

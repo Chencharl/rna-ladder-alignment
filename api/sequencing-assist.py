@@ -305,15 +305,22 @@ def analyze():
             # tm5U, acp3U, manQ/galQ, archaeosine, ms2t6A, Ar(p), etc.
             algo_cfg = _AlgoConfig(
                 mass_tol=_CHAIN_TOL,
+                # rt_std_floor=0.30 is empirically larger than the Config
+                # default (0.02 min) to tolerate the natural RT drift seen in
+                # deconvoluted LC-MS data.  min_rt_history=3 requires at least
+                # 3 confirmed steps before the RT trend filter activates.
                 rt_std_floor=0.30,
                 min_rt_history=3,
                 precursor_mass=precursor_mass_param,
                 allowed_masses=dict(_RESIDUE_MASS),
-                # Strict single-residue steps only: every chain edge must
-                # correspond to exactly one observed mass difference matching
-                # a known residue within _CHAIN_TOL. max_residues_per_step>1
-                # allows multi-residue gap jumps that produce misleading calls.
-                max_residues_per_step=1,
+                # max_residues_per_step=3 is Dr. Jiang's strict default:
+                # each greedy extension step may span up to 3 residue masses,
+                # which allows chains to bridge up to 2 missing ladder rungs
+                # (max_missing_positions = max_residues_per_step - 1 = 2).
+                # Do NOT set to 1 — that breaks gap-tolerance and deviates
+                # from the published method.  Use exploratory_mode=True
+                # (max_residues_per_step=4) only for noisy / low-coverage data.
+                max_residues_per_step=3,
             )
             result = _run_nested_pipeline(
                 df=df_pipeline, out_dir=out_dir, reference=ref_tokens, cfg=algo_cfg
