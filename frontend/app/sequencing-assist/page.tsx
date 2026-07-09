@@ -5,15 +5,17 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { CoverageByIntensity } from "./components/CoverageByIntensity";
 import { ComparisonPanel } from "./components/ComparisonPanel";
 import { DataQualityCard } from "./components/DataQualityCard";
+import { DeNovoReadsTable } from "./components/DeNovoReadsTable";
 import { ExcelUploader } from "./components/ExcelUploader";
 import { MassRTPlot } from "./components/MassRTPlot";
+import { ModificationCandidates } from "./components/ModificationCandidates";
 import { PeakScatterPlot } from "./components/PeakScatterPlot";
 import { QCPreview } from "./components/QCPreview";
 import { RunOverview } from "./components/RunOverview";
 import { ModificationProfile } from "./components/ModificationProfile";
 import { MethodsGuide } from "./components/MethodsGuide";
-import { TopParallelReads } from "./components/TopParallelReads";
 import { SequenceAssembly } from "./components/SequenceAssembly";
+import { UnexplainedPeaks } from "./components/UnexplainedPeaks";
 import { Card } from "./components/ui";
 import type {
   UploadRawResponse,
@@ -584,9 +586,19 @@ export default function SequencingAssist() {
 
                   {/* Stat chips */}
                   <div className="flex flex-wrap gap-2 mb-2">
+                    {pipelineMeta && pipelineMeta.nChainsTotal > 0 && (
+                      <span className="inline-flex items-center rounded-full bg-white border border-green-200 px-2.5 py-0.5 text-xs font-medium text-green-700">
+                        {pipelineMeta.nChainsTotal.toLocaleString()} candidate read{pipelineMeta.nChainsTotal !== 1 ? "s" : ""} recovered
+                      </span>
+                    )}
                     {pipelineMeta && (
                       <span className="inline-flex items-center rounded-full bg-white border border-green-200 px-2.5 py-0.5 text-xs font-medium text-green-700">
-                        {pipelineMeta.nChainsMin10} reads ≥ {pipelineMeta.minChainLenShown} nt
+                        {pipelineMeta.nChainsMin10} passed ≥{pipelineMeta.minChainLenShown} nt filter
+                      </span>
+                    )}
+                    {pipelineMeta && pipelineMeta.nChainsTotal > pipelineMeta.nChainsMin10 && (
+                      <span className="inline-flex items-center rounded-full bg-gray-100 border border-gray-200 px-2.5 py-0.5 text-xs font-medium text-gray-500">
+                        {(pipelineMeta.nChainsTotal - pipelineMeta.nChainsMin10).toLocaleString()} shorter reads exist — lower min length to include
                       </span>
                     )}
                     {(report as any)?.read_call_counts && (
@@ -630,6 +642,9 @@ export default function SequencingAssist() {
                   <p className="text-xs text-gray-400">
                     Excel includes candidate reads, decoded sequences, coverage analysis, and modification profile
                     {referenceSequence.trim() ? " + reference comparison" : ""}.
+                  </p>
+                  <p className="text-xs text-amber-700 mt-1">
+                    5′/3′/ambiguous/conflict labels are algorithmic orientation scores, not confirmed sequence identities — all calls require experimental validation.
                   </p>
                 </div>
 
@@ -702,17 +717,36 @@ export default function SequencingAssist() {
             />
           )}
 
-          {/* Core views 3 + 4 — coverage + candidate reads table */}
+          {/* Coverage analysis */}
           {hasResults && (
-            <>
-              <CoverageByIntensity bins={coverageBins} byMassRange={coverageMassRange} fdrEstimate={empiricalFdr} />
-              <TopParallelReads
-                rows={topParallel}
-                selectedReadRank={selectedReadRank}
-                onSelectRead={selectRead}
-              />
-              <ModificationProfile counts={modCounts} />
-            </>
+            <CoverageByIntensity bins={coverageBins} byMassRange={coverageMassRange} fdrEstimate={empiricalFdr} />
+          )}
+
+          {/* De novo reads table — replaces card-grid TopParallelReads */}
+          {hasResults && (
+            <DeNovoReadsTable
+              rows={topParallel}
+              decisions={decisions}
+              nChainsTotal={pipelineMeta?.nChainsTotal ?? 0}
+              minChainLen={pipelineMeta?.minChainLenShown ?? 10}
+              selectedReadRank={selectedReadRank}
+              onSelectRead={selectRead}
+              refComparisons={refComparisons}
+            />
+          )}
+
+          {/* Modification candidates — non-canonical decoded positions */}
+          {hasResults && <ModificationCandidates rows={topParallel} />}
+
+          {/* Modification profile — aggregate mod-type counts */}
+          {hasResults && <ModificationProfile counts={modCounts} />}
+
+          {/* Unexplained high-intensity peaks */}
+          {hasResults && (
+            <UnexplainedPeaks
+              peakStatus={peakStatus}
+              nChainsTotal={pipelineMeta?.nChainsTotal ?? 0}
+            />
           )}
 
           {/* Methods guide — always visible so users can read the algorithm description */}
