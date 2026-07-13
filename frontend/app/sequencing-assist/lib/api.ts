@@ -190,15 +190,29 @@ const I_NAMES = new Set(["i", "intensity", "sum intensity", "peak intensity",
 const T_NAMES = new Set(["t", "rt", "retention time", "time", "apex rt",
   "apex retention time", "retention time (min)"]);
 
+// Client-side pre-subsample: mirrors the server's PRE_SUB_LIMIT logic.
+// 320 Da blocks, top-50 by intensity per block → max ~16,000 rows → ~640 KB JSON.
+// Guarantees the payload fits within Vercel's 4.5 MB body limit regardless of
+// input file size (18S rRNA charge-1 files can produce >150,000 rows).
+const CLIENT_PRESUB_LIMIT = 20_000;
+const BLOCK_WIDTH_DA = 320;
+const TOP_PER_BLOCK = 50;
+
+// Hydrolysis ladder analysis range. Rows outside this window are discarded
+// client-side — the server applies the same 2,000–23,000 Da filter anyway,
+// so sending masses outside it wastes payload budget.
+const HYDRO_M_MIN = 1_500;
+const HYDRO_M_MAX = 25_000;
+
 async function parseExcelToRows(file: File): Promise<{ M: number; I: number; T: number }[]> {
   const { read, utils } = await import("xlsx");
   const buffer = await file.arrayBuffer();
   const wb = read(buffer, { type: "array" });
   const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null });
-  if (rows.length === 0) throw new Error("Spreadsheet appears empty");
+  const rawRows = utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null });
+  if (rawRows.length === 0) throw new Error("Spreadsheet appears empty");
 
-  const colKeys = Object.keys(rows[0]);
+  const colKeys = Object.keys(rawRows[0]);
   let mCol = "", iCol = "", tCol = "";
   for (const col of colKeys) {
     const lc = col.toLowerCase().trim();
@@ -212,15 +226,46 @@ async function parseExcelToRows(file: File): Promise<{ M: number; I: number; T: 
   if (!tCol) tCol = colKeys[2] ?? "";
   if (!mCol || !iCol || !tCol) throw new Error("Cannot detect M/I/T columns in this file");
 
+  // Parse + filter to hydrolysis ladder range + round precision to cut payload size
   const result: { M: number; I: number; T: number }[] = [];
-  for (const row of rows) {
+  for (const row of rawRows) {
     const M = Number(row[mCol]);
     const I = Number(row[iCol]);
     const T = Number(row[tCol]);
-    if (isFinite(M) && M > 0 && isFinite(I) && I >= 0 && isFinite(T) && T >= 0) {
-      result.push({ M, I, T });
+    if (
+      isFinite(M) && M >= HYDRO_M_MIN && M <= HYDRO_M_MAX &&
+      isFinite(I) && I >= 0 &&
+      isFinite(T) && T >= 0
+    ) {
+      result.push({
+        M: Math.round(M * 100) / 100,    // 0.01 Da precision (sufficient for this algorithm)
+        I: Math.round(I),                 // integer intensity
+        T: Math.round(T * 1000) / 1000,  // 1 ms RT precision
+      });
     }
   }
+
+  if (result.length === 0) throw new Error("No peaks in the 1,500–25,000 Da range found in this file");
+
+  // Client-side pre-subsampling for very large datasets (e.g. 18S rRNA charge-1).
+  // Mirrors server PRE_SUB_LIMIT: top-N per 320 Da block, preserving high-signal peaks.
+  if (result.length > CLIENT_PRESUB_LIMIT) {
+    const blocks = new Map<number, { M: number; I: number; T: number }[]>();
+    for (const r of result) {
+      const blockId = Math.round(r.M / BLOCK_WIDTH_DA);
+      const b = blocks.get(blockId) ?? [];
+      b.push(r);
+      blocks.set(blockId, b);
+    }
+    const subsampled: { M: number; I: number; T: number }[] = [];
+    for (const b of blocks.values()) {
+      b.sort((a, z) => z.I - a.I);          // descending by intensity
+      subsampled.push(...b.slice(0, TOP_PER_BLOCK));
+    }
+    subsampled.sort((a, b) => a.M - b.M);
+    return subsampled;
+  }
+
   return result;
 }
 
