@@ -463,7 +463,7 @@ export default function SequencingAssist() {
                     </svg>
                     <p className="text-sm font-semibold text-blue-800 animate-pulse">
                       {phase === "parsing_large_file"
-                        ? `Parsing ${selectedFile ? (selectedFile.size / 1024 / 1024).toFixed(1) : ""}  MB file locally — extracting M/I/T columns…`
+                        ? `Parsing ${selectedFile ? (selectedFile.size / 1024 / 1024).toFixed(1) : ""} MB locally — filtering to ladder range and extracting M/I/T columns…`
                         : PROGRESS_STAGES[progressStage]}
                     </p>
                   </div>
@@ -481,7 +481,7 @@ export default function SequencingAssist() {
                   )}
                   <p className="text-xs text-gray-400 mt-2">
                     {phase === "parsing_large_file"
-                      ? "File is read locally in your browser — nothing is uploaded yet."
+                      ? "File is read locally in your browser — only the 1,500–25,000 Da ladder region is sent to the server."
                       : "Large files may take 30–60 s on first run."}
                   </p>
                 </div>
