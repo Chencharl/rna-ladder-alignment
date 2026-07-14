@@ -82,6 +82,16 @@ export default function SequencingAssist() {
   const [prophetMatching, setProphetMatching] = useState<import("./lib/api").ProphetMatchingResult | null>(null);
   const [referenceSequence, setReferenceSequence] = useState("");
   const [progressStage, setProgressStage] = useState(0);
+
+  // Preset reference sequences for common rRNA targets
+  const RRNA_PRESETS: { label: string; seq: string; nt: number }[] = [
+    {
+      label: "5.8S rRNA (156 nt)",
+      nt: 156,
+      // Sequence from Dr. Jiang's HEK cell LC-MS dataset (native prophet sheet)
+      seq: "UCGUAGACUCUUAGCGGUGGAUCACUCGGCUCGUGCGUCGAUGAAGAACGCAGCUAGCUGCGAGAAUUAAUGUGAAUUGCAGGACACAUUGAUCAUCGACACUUCGAACGCACUUGCGGCCCCGGGUUCCUCCCGGGGCUACGCCUGUCUGAGCGU",
+    },
+  ];
   const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Comparison mode (Tier 3) ─────────────────────────────────────────────
@@ -420,19 +430,44 @@ export default function SequencingAssist() {
                   {/* Reference sequence — optional */}
                   <Card
                     title="Reference sequence (optional)"
-                    subtitle="Leave blank for pure de-novo analysis. If provided, recovered reads are compared against this sequence to flag candidate modifications."
+                    subtitle="Leave blank for pure de-novo analysis. When provided, the pipeline performs position-by-position prophet matching and embeds a coverage sheet in the Excel output."
                   >
+                    {/* Preset buttons */}
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      <span className="text-xs text-gray-400 self-center">Presets:</span>
+                      {RRNA_PRESETS.map((p) => (
+                        <button
+                          key={p.label}
+                          type="button"
+                          disabled={isRunning}
+                          onClick={() => setReferenceSequence(p.seq)}
+                          className="text-xs px-2 py-1 rounded border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-40 transition-colors"
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                      {referenceSequence.trim() && (
+                        <button
+                          type="button"
+                          disabled={isRunning}
+                          onClick={() => setReferenceSequence("")}
+                          className="text-xs px-2 py-1 rounded border border-gray-200 text-gray-500 hover:bg-gray-100 disabled:opacity-40 transition-colors"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
                     <textarea
                       value={referenceSequence}
                       onChange={(e) => setReferenceSequence(e.target.value)}
-                      placeholder="GCUACGGCCAUACCACCCU… (A/U/G/C, T accepted as U)"
-                      rows={6}
+                      placeholder="GCUACGGCCAUACCACCCU… (A/U/G/C, T accepted as U). Paste any RNA sequence or select a preset above."
+                      rows={5}
                       disabled={isRunning}
                       className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none disabled:bg-gray-50 disabled:text-gray-400"
                     />
                     {referenceSequence.trim() && (
                       <p className="mt-1 text-xs text-gray-400">
-                        {referenceSequence.replace(/\s/g, "").length} characters entered.
+                        {referenceSequence.replace(/\s/g, "").length} nt entered. Prophet matching will run and a coverage sheet with charts will be added to the Excel output.
                       </p>
                     )}
                   </Card>
@@ -509,8 +544,32 @@ export default function SequencingAssist() {
                 <>
                   <Card
                     title="Reference sequence (optional)"
-                    subtitle="Leave blank for de-novo analysis. Paste a known sequence (5′→3′, A/U/G/C) to compare against recovered reads."
+                    subtitle="Leave blank for de-novo analysis. When provided, performs prophet matching and adds a coverage sheet with charts to the Excel output."
                   >
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      <span className="text-xs text-gray-400 self-center">Presets:</span>
+                      {RRNA_PRESETS.map((p) => (
+                        <button
+                          key={p.label}
+                          type="button"
+                          disabled={isRunning || phase === "pipeline_complete"}
+                          onClick={() => setReferenceSequence(p.seq)}
+                          className="text-xs px-2 py-1 rounded border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-40 transition-colors"
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                      {referenceSequence.trim() && (
+                        <button
+                          type="button"
+                          disabled={isRunning || phase === "pipeline_complete"}
+                          onClick={() => setReferenceSequence("")}
+                          className="text-xs px-2 py-1 rounded border border-gray-200 text-gray-500 hover:bg-gray-100 disabled:opacity-40 transition-colors"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
                     <textarea
                       value={referenceSequence}
                       onChange={(e) => setReferenceSequence(e.target.value)}
@@ -521,7 +580,7 @@ export default function SequencingAssist() {
                     />
                     {referenceSequence.trim() && (
                       <p className="mt-1 text-xs text-gray-400">
-                        {referenceSequence.replace(/\s/g, "").length} characters.
+                        {referenceSequence.replace(/\s/g, "").length} nt entered.
                         {phase === "pipeline_complete" && " Re-upload to run with this reference."}
                       </p>
                     )}
