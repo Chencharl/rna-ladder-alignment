@@ -912,10 +912,15 @@ def _run_prophet_matching(
     df_peaks: "pd.DataFrame",
     mass_start_5p: float = _MASS_START_5P,
     mass_start_3p: float = _MASS_START_3P,
-    tol_da: float = 0.02,
+    tol_da: float = 0.10,
 ) -> dict:
     """
     Reference-guided ladder matching (Dr. Jiang's prophet approach).
+
+    tol_da=0.10 Da (100 mDa) matches the real-world mass accuracy of deconvoluted
+    LC-MS data for large RNA: Orbitrap FT-MS achieves ~5-15 ppm, which equals
+    50-150 mDa for fragments in the 5-15 kDa range. The ±20 mDa lines in the
+    Prophet Coverage chart are visual quality-control markers, NOT the search gate.
 
     For each position in the reference sequence, computes theoretical cumulative
     masses for both 5' and 3' ladders, then searches observed peaks within tol_da.
