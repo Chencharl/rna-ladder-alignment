@@ -44,7 +44,7 @@ from trna_nested_algorithm import (  # noqa: E402
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 PRE_SUB_LIMIT = 20_000
-PIPELINE_POINT_LIMIT = 8_000
+PIPELINE_POINT_LIMIT = 6_000
 
 # ── tRNA reference mapping ─────────────────────────────────────────────────────
 # Theoretical RNA ladder mass terminus constants validated against Dr. Jiang's
