@@ -63,10 +63,48 @@ export interface TRNARefLibrary {
   match_pct: number;
 }
 
+export interface ProphetMatchingRow {
+  position: number;
+  residue: string;
+  // 5' ladder
+  theor_mass_5p: number;
+  in_range_5p: boolean;
+  hit_5p: boolean;
+  obs_mass_5p: number | null;
+  obs_intensity_5p: number | null;
+  obs_rt_5p: number | null;
+  obs_rel_i_5p: number | null;
+  delta_mda_5p: number | null;
+  // 3' ladder
+  theor_mass_3p: number;
+  in_range_3p: boolean;
+  hit_3p: boolean;
+  obs_mass_3p: number | null;
+  obs_intensity_3p: number | null;
+  obs_rt_3p: number | null;
+  obs_rel_i_3p: number | null;
+  delta_mda_3p: number | null;
+}
+
+export interface ProphetMatchingResult {
+  rows: ProphetMatchingRow[];
+  n_positions: number;
+  n_in_range_5p: number;
+  n_in_range_3p: number;
+  n_5p_hits: number;
+  n_3p_hits: number;
+  coverage_5p_pct: number;
+  coverage_3p_pct: number;
+  best_consecutive_5p: number;
+  best_consecutive_3p: number;
+  tolerance_da: number;
+}
+
 export interface PipelineResponse {
   report: Record<string, unknown>;
   reference_comparisons?: Record<string, import("./types").RefComparison> | null;
   reference_sequence_used?: string | null;
+  prophet_matching?: ProphetMatchingResult | null;
   top_parallel_reads_long: Record<string, unknown>[] | null;
   sequencing_decision_summary: Record<string, unknown>[] | null;
   classification_evidence: Record<string, unknown>[] | null;

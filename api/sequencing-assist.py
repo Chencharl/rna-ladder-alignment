@@ -483,6 +483,14 @@ def analyze():
         )
         ref_library_loaded = n_ref_theoretical > 0
 
+        # ── 6c. Prophet matching (reference-guided) ───────────────────────
+        # Run for EVERY uploaded file using df_stored (all peaks in the client-
+        # side window, before pipeline subsampling) so we don't lose long-ladder
+        # fragments that fall outside the top-25-per-block subset.
+        prophet_result = None
+        if ref_tokens:
+            prophet_result = _run_prophet_matching(ref_tokens, df_stored)
+
         # ── 7. Run pipeline ───────────────────────────────────────────────
         out_dir = os.path.join(tmpdir, "output")
         os.makedirs(out_dir, exist_ok=True)
@@ -881,6 +889,7 @@ def analyze():
             "n_pipeline_points": len(df_pipeline),
             "reference_comparisons": ref_comparison_map or None,
             "reference_sequence_used": "".join(ref_tokens) if ref_tokens else None,
+            "prophet_matching": _sanitize(prophet_result),
             # tRNA reference library statistics
             "tRNA_ref_library": {
                 "loaded": ref_library_loaded,
@@ -896,6 +905,161 @@ def analyze():
 
 
 # ── Helper functions ───────────────────────────────────────────────────────────
+
+def _run_prophet_matching(
+    seq_tokens: list,
+    df_peaks: "pd.DataFrame",
+    mass_start_5p: float = _MASS_START_5P,
+    mass_start_3p: float = _MASS_START_3P,
+    tol_da: float = 0.02,
+) -> dict:
+    """
+    Reference-guided ladder matching (Dr. Jiang's prophet approach).
+
+    For each position in the reference sequence, computes theoretical cumulative
+    masses for both 5' and 3' ladders, then searches observed peaks within tol_da.
+    Unlike de novo chain building this approach starts from a KNOWN reference and
+    checks whether expected fragment masses are observed — enabling full-length
+    (72+ nt) coverage reports rather than short de novo chains.
+
+    Returns a dict with per-position hit/miss data and summary statistics.
+    """
+    empty = {
+        "rows": [], "n_positions": 0,
+        "n_in_range_5p": 0, "n_in_range_3p": 0,
+        "n_5p_hits": 0, "n_3p_hits": 0,
+        "coverage_5p_pct": 0.0, "coverage_3p_pct": 0.0,
+        "best_consecutive_5p": 0, "best_consecutive_3p": 0,
+        "tolerance_da": tol_da,
+    }
+    if not seq_tokens or len(df_peaks) == 0:
+        return empty
+
+    # Resolve each token to a residue mass (try both mass dictionaries)
+    resolved: list[tuple[str, float]] = []
+    for tok in seq_tokens:
+        m = _REF_SYMBOL_MASS.get(tok) or _RESIDUE_MASS.get(tok)
+        if m and m > 0:
+            resolved.append((tok, float(m)))
+    n = len(resolved)
+    if n == 0:
+        return {**empty, "n_positions": len(seq_tokens)}
+
+    # Build sorted observed-mass arrays for fast binary search
+    peaks_in_range = df_peaks[
+        (df_peaks["M"] >= 1_500) & (df_peaks["M"] <= 25_000)
+    ].copy()
+    if len(peaks_in_range) == 0:
+        return {**empty, "n_positions": n}
+
+    sort_idx = np.argsort(peaks_in_range["M"].values)
+    obs_masses_s = peaks_in_range["M"].values[sort_idx]
+    obs_int_s = peaks_in_range["I"].values[sort_idx]
+    obs_rt_s = peaks_in_range["T"].values[sort_idx]
+    obs_rel_i_s = (
+        peaks_in_range["Rel_I"].values
+        if "Rel_I" in peaks_in_range.columns
+        else np.ones(len(peaks_in_range))
+    )[sort_idx]
+
+    def _find_best_peak(theor_mass: float):
+        lo = int(np.searchsorted(obs_masses_s, theor_mass - tol_da))
+        hi = int(np.searchsorted(obs_masses_s, theor_mass + tol_da, side="right"))
+        if hi <= lo:
+            return None
+        best_i = lo + int(np.argmax(obs_int_s[lo:hi]))
+        return {
+            "obs_mass": round(float(obs_masses_s[best_i]), 4),
+            "obs_intensity": float(obs_int_s[best_i]),
+            "obs_rt": round(float(obs_rt_s[best_i]), 4),
+            "obs_rel_i": round(float(obs_rel_i_s[best_i]), 6),
+            "delta_mda": round((obs_masses_s[best_i] - theor_mass) * 1000, 2),
+        }
+
+    # 5' ladder: cumulative sum from 5' end
+    theor_5p: list[float] = []
+    cumsum = 0.0
+    for _, mass in resolved:
+        cumsum += mass
+        theor_5p.append(mass_start_5p + cumsum)
+
+    # 3' ladder: cumulative sum from 3' end (then mapped back to 5'→3' positions)
+    theor_3p_3to5: list[float] = []
+    cumsum = 0.0
+    for _, mass in reversed(resolved):
+        cumsum += mass
+        theor_3p_3to5.append(mass_start_3p + cumsum)
+    # Reverse so index i = position i from the 5' end (n-i nucleotides from 3' end)
+    theor_3p = list(reversed(theor_3p_3to5))
+
+    LADDER_MIN = 2_000.0
+    LADDER_MAX = 23_000.0
+    rows: list[dict] = []
+    hit_5p_valid: list[bool] = []
+    hit_3p_valid: list[bool] = []
+
+    for pos_idx, (token, _) in enumerate(resolved):
+        t5 = theor_5p[pos_idx]
+        t3 = theor_3p[pos_idx]
+        in5 = LADDER_MIN <= t5 <= LADDER_MAX
+        in3 = LADDER_MIN <= t3 <= LADDER_MAX
+        hit5 = _find_best_peak(t5) if in5 else None
+        hit3 = _find_best_peak(t3) if in3 else None
+
+        rows.append({
+            "position": pos_idx + 1,
+            "residue": token,
+            # 5' ladder
+            "theor_mass_5p": round(t5, 4),
+            "in_range_5p": in5,
+            "hit_5p": hit5 is not None,
+            "obs_mass_5p": hit5["obs_mass"] if hit5 else None,
+            "obs_intensity_5p": hit5["obs_intensity"] if hit5 else None,
+            "obs_rt_5p": hit5["obs_rt"] if hit5 else None,
+            "obs_rel_i_5p": hit5["obs_rel_i"] if hit5 else None,
+            "delta_mda_5p": hit5["delta_mda"] if hit5 else None,
+            # 3' ladder
+            "theor_mass_3p": round(t3, 4),
+            "in_range_3p": in3,
+            "hit_3p": hit3 is not None,
+            "obs_mass_3p": hit3["obs_mass"] if hit3 else None,
+            "obs_intensity_3p": hit3["obs_intensity"] if hit3 else None,
+            "obs_rt_3p": hit3["obs_rt"] if hit3 else None,
+            "obs_rel_i_3p": hit3["obs_rel_i"] if hit3 else None,
+            "delta_mda_3p": hit3["delta_mda"] if hit3 else None,
+        })
+        hit_5p_valid.append(in5 and hit5 is not None)
+        hit_3p_valid.append(in3 and hit3 is not None)
+
+    n_in_range_5p = sum(r["in_range_5p"] for r in rows)
+    n_in_range_3p = sum(r["in_range_3p"] for r in rows)
+    n_5p_hits = sum(hit_5p_valid)
+    n_3p_hits = sum(hit_3p_valid)
+
+    def _longest_run(bools: list[bool]) -> int:
+        max_r = cur = 0
+        for b in bools:
+            if b:
+                cur += 1
+                max_r = max(max_r, cur)
+            else:
+                cur = 0
+        return max_r
+
+    return {
+        "rows": rows,
+        "n_positions": n,
+        "n_in_range_5p": n_in_range_5p,
+        "n_in_range_3p": n_in_range_3p,
+        "n_5p_hits": n_5p_hits,
+        "n_3p_hits": n_3p_hits,
+        "coverage_5p_pct": round(n_5p_hits / n_in_range_5p * 100, 1) if n_in_range_5p else 0.0,
+        "coverage_3p_pct": round(n_3p_hits / n_in_range_3p * 100, 1) if n_in_range_3p else 0.0,
+        "best_consecutive_5p": _longest_run(hit_5p_valid),
+        "best_consecutive_3p": _longest_run(hit_3p_valid),
+        "tolerance_da": tol_da,
+    }
+
 
 def _detect_data_type(df):
     n = len(df)

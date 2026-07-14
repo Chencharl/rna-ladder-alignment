@@ -16,6 +16,7 @@ import { ModificationProfile } from "./components/ModificationProfile";
 import { MethodsGuide } from "./components/MethodsGuide";
 import { SequenceAssembly } from "./components/SequenceAssembly";
 import { UnexplainedPeaks } from "./components/UnexplainedPeaks";
+import { ProphetMatchingView } from "./components/ProphetMatchingView";
 import { Card } from "./components/ui";
 import type {
   UploadRawResponse,
@@ -78,6 +79,7 @@ export default function SequencingAssist() {
   const [selectedReadRank, setSelectedReadRank] = useState<number | null>(null);
   const [refComparisons, setRefComparisons] = useState<Record<string, RefComparison> | null>(null);
   const [tRNARefLibrary, setTRNARefLibrary] = useState<TRNARefLibrary | null>(null);
+  const [prophetMatching, setProphetMatching] = useState<import("./lib/api").ProphetMatchingResult | null>(null);
   const [referenceSequence, setReferenceSequence] = useState("");
   const [progressStage, setProgressStage] = useState(0);
   const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -118,6 +120,7 @@ export default function SequencingAssist() {
     setSelectedReadRank(null);
     setRefComparisons(null);
     setTRNARefLibrary(null);
+    setProphetMatching(null);
     setExcelB64(null);
   }
 
@@ -145,6 +148,7 @@ export default function SequencingAssist() {
     });
     setRefComparisons((result as any).reference_comparisons ?? null);
     setTRNARefLibrary((result as any).tRNA_ref_library ?? null);
+    setProphetMatching((result as any).prophet_matching ?? null);
     setSelectedReadRank(null);
   }
 
@@ -747,6 +751,11 @@ export default function SequencingAssist() {
               peakStatus={peakStatus}
               nChainsTotal={pipelineMeta?.nChainsTotal ?? 0}
             />
+          )}
+
+          {/* Reference-guided prophet matching — shown when reference provided, or always as prompt */}
+          {(hasResults || referenceSequence.trim()) && (
+            <ProphetMatchingView result={prophetMatching} />
           )}
 
           {/* Methods guide — always visible so users can read the algorithm description */}
