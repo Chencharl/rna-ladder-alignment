@@ -44,7 +44,7 @@ from trna_nested_algorithm import (  # noqa: E402
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 PRE_SUB_LIMIT = 20_000
-PIPELINE_POINT_LIMIT = 8_000
+PIPELINE_POINT_LIMIT = 6_000
 
 # ── tRNA reference mapping ─────────────────────────────────────────────────────
 # Theoretical RNA ladder mass terminus constants validated against Dr. Jiang's
@@ -837,6 +837,7 @@ def analyze():
             "min_chain_len_shown": min_len,
             "rt_quality": rt_quality,
             "precursor_mass": precursor_mass_param,
+            "prophet_matching": prophet_result,
         }
         try:
             excel_bytes = _build_excel(out_dir, sidecar)
@@ -1543,6 +1544,142 @@ def _build_excel(out_dir_str, sidecar):
             r = ws4.max_row + 1
             ws4.cell(row=r, column=1, value=f"  {delta} Da")
             ws4.cell(row=r, column=2, value=f"{count} occurrence(s)")
+
+    # Sheet 5: Prophet Coverage (reference-guided ladder matching)
+    prophet = sidecar.get("prophet_matching")
+    if prophet and prophet.get("rows"):
+        from openpyxl.chart import ScatterChart, Reference, Series
+
+        ws5 = wb.create_sheet("Prophet Coverage")
+
+        n_pos = prophet["n_positions"]
+        n_5p_hits = prophet["n_5p_hits"]
+        n_3p_hits = prophet["n_3p_hits"]
+        n_in_5p = prophet["n_in_range_5p"]
+        n_in_3p = prophet["n_in_range_3p"]
+        cov5 = prophet["coverage_5p_pct"]
+        cov3 = prophet["coverage_3p_pct"]
+        best5 = prophet["best_consecutive_5p"]
+        best3 = prophet["best_consecutive_3p"]
+        tol = prophet["tolerance_da"]
+
+        ws5.cell(row=1, column=1, value="Reference-Guided Ladder Coverage").font = Font(bold=True, size=14)
+        ws5.cell(row=2, column=1,
+                 value=f"5′ coverage: {n_5p_hits}/{n_in_5p} ({cov5}%)  |  3′ coverage: {n_3p_hits}/{n_in_3p} ({cov3}%)  |  Tolerance ±{tol*1000:.0f} mDa")
+        ws5.cell(row=3, column=1,
+                 value=f"Best consecutive run: 5′ = {best5} nt  |  3′ = {best3} nt  |  Reference length: {n_pos} nt")
+        ws5.append([])
+
+        DATA_ROW_START = 5
+        cols_p = [
+            "Pos", "Residue",
+            "5′ Theor (Da)", "5′ In Range", "5′ Hit",
+            "5′ Obs (Da)", "5′ Δ (mDa)", "5′ Rel.I (%)", "5′ RT (min)",
+            "3′ Theor (Da)", "3′ In Range", "3′ Hit",
+            "3′ Obs (Da)", "3′ Δ (mDa)", "3′ Rel.I (%)", "3′ RT (min)",
+        ]
+        set_header(ws5, cols_p)
+
+        BLUE_HIT = PatternFill("solid", fgColor="DBEAFE")
+        PURP_HIT = PatternFill("solid", fgColor="EDE9FE")
+        BOTH_HIT = PatternFill("solid", fgColor="D1FAE5")
+        MISS_FILL_P = PatternFill("solid", fgColor="F9FAFB")
+
+        for i, rd in enumerate(prophet["rows"]):
+            r = DATA_ROW_START + 1 + i
+            h5, h3 = rd["hit_5p"], rd["hit_3p"]
+            fill = (
+                BOTH_HIT if (h5 and h3) else
+                BLUE_HIT if h5 else
+                PURP_HIT if h3 else
+                MISS_FILL_P if (rd["in_range_5p"] or rd["in_range_3p"]) else None
+            )
+            vals = [
+                rd["position"],
+                rd["residue"],
+                round(rd["theor_mass_5p"], 4) if rd["in_range_5p"] else "",
+                "Yes" if rd["in_range_5p"] else "No",
+                "✓" if h5 else ("✗" if rd["in_range_5p"] else "○"),
+                round(rd["obs_mass_5p"], 4) if (h5 and rd["obs_mass_5p"] is not None) else "",
+                round(rd["delta_mda_5p"], 2) if (h5 and rd["delta_mda_5p"] is not None) else "",
+                round(rd["obs_rel_i_5p"] * 100, 2) if (h5 and rd["obs_rel_i_5p"] is not None) else "",
+                round(rd["obs_rt_5p"], 3) if (h5 and rd["obs_rt_5p"] is not None) else "",
+                round(rd["theor_mass_3p"], 4) if rd["in_range_3p"] else "",
+                "Yes" if rd["in_range_3p"] else "No",
+                "✓" if h3 else ("✗" if rd["in_range_3p"] else "○"),
+                round(rd["obs_mass_3p"], 4) if (h3 and rd["obs_mass_3p"] is not None) else "",
+                round(rd["delta_mda_3p"], 2) if (h3 and rd["delta_mda_3p"] is not None) else "",
+                round(rd["obs_rel_i_3p"] * 100, 2) if (h3 and rd["obs_rel_i_3p"] is not None) else "",
+                round(rd["obs_rt_3p"], 3) if (h3 and rd["obs_rt_3p"] is not None) else "",
+            ]
+            for c, val in enumerate(vals, 1):
+                cell = ws5.cell(row=r, column=c, value=val)
+                cell.border = border
+                if fill:
+                    cell.fill = fill
+
+        last_data_row = DATA_ROW_START + len(prophet["rows"])
+
+        # Chart 1: RT elution profile — Position vs Apex RT for detected fragments
+        chart1 = ScatterChart()
+        chart1.title = "RT Elution Profile (Detected Ladder Fragments)"
+        chart1.style = 10
+        chart1.xAxis.title = "Sequence Position (nt)"
+        chart1.yAxis.title = "Apex RT (min)"
+        chart1.width = 26
+        chart1.height = 14
+
+        x_ref = Reference(ws5, min_col=1, min_row=DATA_ROW_START + 1, max_row=last_data_row)
+        # 5' RT: col 9
+        y5rt = Reference(ws5, min_col=9, min_row=DATA_ROW_START + 1, max_row=last_data_row)
+        ser5rt = Series(y5rt, x_ref, title="5′ ladder")
+        ser5rt.marker.symbol = "circle"
+        ser5rt.marker.size = 6
+        ser5rt.graphicalProperties.line.noFill = True
+        chart1.series.append(ser5rt)
+        # 3' RT: col 16
+        y3rt = Reference(ws5, min_col=16, min_row=DATA_ROW_START + 1, max_row=last_data_row)
+        ser3rt = Series(y3rt, x_ref, title="3′ ladder")
+        ser3rt.marker.symbol = "diamond"
+        ser3rt.marker.size = 6
+        ser3rt.graphicalProperties.line.noFill = True
+        chart1.series.append(ser3rt)
+
+        ws5.add_chart(chart1, f"A{last_data_row + 2}")
+
+        # Chart 2: Mass accuracy — Position vs Δmass (mDa)
+        chart2 = ScatterChart()
+        chart2.title = "Mass Accuracy: Observed − Theoretical (±mDa)"
+        chart2.style = 10
+        chart2.xAxis.title = "Sequence Position (nt)"
+        chart2.yAxis.title = "Δ Mass (mDa)"
+        chart2.width = 26
+        chart2.height = 14
+
+        # 5' Δmda: col 7
+        y5d = Reference(ws5, min_col=7, min_row=DATA_ROW_START + 1, max_row=last_data_row)
+        ser5d = Series(y5d, x_ref, title="5′ Δmass")
+        ser5d.marker.symbol = "circle"
+        ser5d.marker.size = 5
+        ser5d.graphicalProperties.line.noFill = True
+        chart2.series.append(ser5d)
+        # 3' Δmda: col 14
+        y3d = Reference(ws5, min_col=14, min_row=DATA_ROW_START + 1, max_row=last_data_row)
+        ser3d = Series(y3d, x_ref, title="3′ Δmass")
+        ser3d.marker.symbol = "diamond"
+        ser3d.marker.size = 5
+        ser3d.graphicalProperties.line.noFill = True
+        chart2.series.append(ser3d)
+
+        ws5.add_chart(chart2, f"R{last_data_row + 2}")
+
+        ws5.freeze_panes = f"A{DATA_ROW_START + 1}"
+        ws5.column_dimensions["A"].width = 8
+        ws5.column_dimensions["B"].width = 12
+        ws5.column_dimensions["E"].width = 10
+        ws5.column_dimensions["L"].width = 10
+        for col_letter in ["C", "F", "G", "H", "I", "J", "M", "N", "O", "P"]:
+            ws5.column_dimensions[col_letter].width = 16
 
     buf = io.BytesIO()
     wb.save(buf)
