@@ -6,7 +6,7 @@
   "outputDirectory": "frontend/.next",
   "functions": {
     "api/sequencing-assist.py": {
-      "memory": 3009,
+      "memory": 2048,
       "maxDuration": 300,
       "includeFiles": "trna_nested_algorithm.py|api/trna_reference.py"
     }
