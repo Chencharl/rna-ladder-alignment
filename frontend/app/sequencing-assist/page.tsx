@@ -80,15 +80,20 @@ export default function SequencingAssist() {
   const [refComparisons, setRefComparisons] = useState<Record<string, RefComparison> | null>(null);
   const [tRNARefLibrary, setTRNARefLibrary] = useState<TRNARefLibrary | null>(null);
   const [prophetMatching, setProphetMatching] = useState<import("./lib/api").ProphetMatchingResult | null>(null);
+  const [presetProphetResults, setPresetProphetResults] = useState<Record<string, import("./lib/api").ProphetMatchingResult> | null>(null);
   const [referenceSequence, setReferenceSequence] = useState("");
   const [progressStage, setProgressStage] = useState(0);
 
   // Preset reference sequences for common rRNA targets
   const RRNA_PRESETS: { label: string; seq: string; nt: number }[] = [
     {
+      label: "5S rRNA (120 nt)",
+      nt: 120,
+      seq: "GCCUACGGCCAUACCACCCUGAACGCGCCCGAUCUCGUCUGAUCUCGGAAGCUAAGCAGGGGGUCGGGCCUGGUUAGUACUUGGAUGGGAGACCGCCUGGGAAUACCGGGUGCUGUAGGCU",
+    },
+    {
       label: "5.8S rRNA (156 nt)",
       nt: 156,
-      // Sequence from Dr. Jiang's HEK cell LC-MS dataset (native prophet sheet)
       seq: "UCGUAGACUCUUAGCGGUGGAUCACUCGGCUCGUGCGUCGAUGAAGAACGCAGCUAGCUGCGAGAAUUAAUGUGAAUUGCAGGACACAUUGAUCAUCGACACUUCGAACGCACUUGCGGCCCCGGGUUCCUCCCGGGGCUACGCCUGUCUGAGCGU",
     },
   ];
@@ -131,6 +136,7 @@ export default function SequencingAssist() {
     setRefComparisons(null);
     setTRNARefLibrary(null);
     setProphetMatching(null);
+    setPresetProphetResults(null);
     setExcelB64(null);
   }
 
@@ -159,6 +165,7 @@ export default function SequencingAssist() {
     setRefComparisons((result as any).reference_comparisons ?? null);
     setTRNARefLibrary((result as any).tRNA_ref_library ?? null);
     setProphetMatching((result as any).prophet_matching ?? null);
+    setPresetProphetResults((result as any).preset_prophet_results ?? null);
     setSelectedReadRank(null);
   }
 
@@ -812,9 +819,12 @@ export default function SequencingAssist() {
             />
           )}
 
-          {/* Reference-guided prophet matching — shown when reference provided, or always as prompt */}
-          {(hasResults || referenceSequence.trim()) && (
-            <ProphetMatchingView result={prophetMatching} />
+          {/* Reference-guided prophet matching — always shown after analysis (built-in presets run unconditionally) */}
+          {hasResults && (
+            <ProphetMatchingView
+              presetResults={presetProphetResults}
+              customResult={prophetMatching}
+            />
           )}
 
           {/* Methods guide — always visible so users can read the algorithm description */}

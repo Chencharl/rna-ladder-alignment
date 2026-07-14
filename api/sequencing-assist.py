@@ -54,6 +54,22 @@ PIPELINE_POINT_LIMIT = 6_000
 _MASS_START_5P = 97.9769
 _MASS_START_3P = -61.9558
 
+# ── Built-in rRNA preset sequences (human HEK cell references) ─────────────────
+# Prophet matching is always run against BOTH presets regardless of whether
+# the user provides a custom reference sequence, so a file containing mixed
+# 5S + 5.8S hydrolysis ladder data shows coverage for each species separately.
+_BUILTIN_RRNA_PRESETS: dict[str, str] = {
+    "5S rRNA (120 nt)": (
+        "GCCUACGGCCAUACCACCCUGAACGCGCCCGAUCUCGUCUGAUCUCGGAAGCUAAGCAGGGG"
+        "UCGGGCCUGGUUAGUACUUGGAUGGGAGACCGCCUGGGAAUACCGGGUGCUGUAGGCU"
+    ),
+    "5.8S rRNA (156 nt)": (
+        "UCGUAGACUCUUAGCGGUGGAUCACUCGGCUCGUGCGUCGAUGAAGAACGCAGCUAGCUGCG"
+        "AGAAUUAAUGUGAAUUGCAGGACACAUUGAUCAUCGACACUUCGAACGCACUUGCGGCCCCG"
+        "GGUUCCUCCCGGGGCUACGCCUGUCUGAGCGU"
+    ),
+}
+
 # Symbol-to-mass for every modification symbol found in 46_tRNA_iso.xlsx Sheet1.
 # Isobaric modifications map to the same mass (indistinguishable by mass alone).
 _REF_SYMBOL_MASS: dict[str, float] = {
@@ -491,6 +507,17 @@ def analyze():
         if ref_tokens:
             prophet_result = _run_prophet_matching(ref_tokens, df_stored)
 
+        # ── 6d. Built-in rRNA preset prophet matching ─────────────────────
+        # Always run against 5S and 5.8S regardless of user reference so a
+        # mixed-species file (e.g. HEK 5S+5.8S) shows coverage for each.
+        preset_prophet_results: dict[str, dict] = {}
+        for preset_label, preset_seq in _BUILTIN_RRNA_PRESETS.items():
+            preset_tokens = [c for c in preset_seq.upper() if c in "AUGC"]
+            if preset_tokens:
+                preset_prophet_results[preset_label] = _run_prophet_matching(
+                    preset_tokens, df_stored
+                )
+
         # ── 7. Run pipeline ───────────────────────────────────────────────
         out_dir = os.path.join(tmpdir, "output")
         os.makedirs(out_dir, exist_ok=True)
@@ -838,6 +865,7 @@ def analyze():
             "rt_quality": rt_quality,
             "precursor_mass": precursor_mass_param,
             "prophet_matching": prophet_result,
+            "preset_prophet_results": preset_prophet_results,
         }
         try:
             excel_bytes = _build_excel(out_dir, sidecar)
@@ -891,6 +919,11 @@ def analyze():
             "reference_comparisons": ref_comparison_map or None,
             "reference_sequence_used": "".join(ref_tokens) if ref_tokens else None,
             "prophet_matching": _sanitize(prophet_result),
+            # Built-in rRNA preset prophet results (5S + 5.8S always included)
+            "preset_prophet_results": {
+                label: _sanitize(res)
+                for label, res in preset_prophet_results.items()
+            },
             # tRNA reference library statistics
             "tRNA_ref_library": {
                 "loaded": ref_library_loaded,
@@ -1550,12 +1583,13 @@ def _build_excel(out_dir_str, sidecar):
             ws4.cell(row=r, column=1, value=f"  {delta} Da")
             ws4.cell(row=r, column=2, value=f"{count} occurrence(s)")
 
-    # Sheet 5: Prophet Coverage (reference-guided ladder matching)
-    prophet = sidecar.get("prophet_matching")
-    if prophet and prophet.get("rows"):
+    def _add_prophet_sheet(ws_name: str, prophet: dict) -> None:
+        """Add one Prophet Coverage sheet to wb for the given prophet result dict."""
+        if not prophet or not prophet.get("rows"):
+            return
         from openpyxl.chart import ScatterChart, Reference, Series
 
-        ws5 = wb.create_sheet("Prophet Coverage")
+        ws = wb.create_sheet(ws_name[:31])  # sheet names max 31 chars in Excel
 
         n_pos = prophet["n_positions"]
         n_5p_hits = prophet["n_5p_hits"]
@@ -1568,12 +1602,12 @@ def _build_excel(out_dir_str, sidecar):
         best3 = prophet["best_consecutive_3p"]
         tol = prophet["tolerance_da"]
 
-        ws5.cell(row=1, column=1, value="Reference-Guided Ladder Coverage").font = Font(bold=True, size=14)
-        ws5.cell(row=2, column=1,
-                 value=f"5′ coverage: {n_5p_hits}/{n_in_5p} ({cov5}%)  |  3′ coverage: {n_3p_hits}/{n_in_3p} ({cov3}%)  |  Tolerance ±{tol*1000:.0f} mDa")
-        ws5.cell(row=3, column=1,
-                 value=f"Best consecutive run: 5′ = {best5} nt  |  3′ = {best3} nt  |  Reference length: {n_pos} nt")
-        ws5.append([])
+        ws.cell(row=1, column=1, value=f"Reference-Guided Coverage — {ws_name}").font = Font(bold=True, size=14)
+        ws.cell(row=2, column=1,
+                value=f"5′ coverage: {n_5p_hits}/{n_in_5p} ({cov5}%)  |  3′ coverage: {n_3p_hits}/{n_in_3p} ({cov3}%)  |  Tolerance ±{tol*1000:.0f} mDa")
+        ws.cell(row=3, column=1,
+                value=f"Best consecutive run: 5′ = {best5} nt  |  3′ = {best3} nt  |  Reference length: {n_pos} nt")
+        ws.append([])
 
         DATA_ROW_START = 5
         cols_p = [
@@ -1583,7 +1617,7 @@ def _build_excel(out_dir_str, sidecar):
             "3′ Theor (Da)", "3′ In Range", "3′ Hit",
             "3′ Obs (Da)", "3′ Δ (mDa)", "3′ Rel.I (%)", "3′ RT (min)",
         ]
-        set_header(ws5, cols_p)
+        set_header(ws, cols_p)
 
         BLUE_HIT = PatternFill("solid", fgColor="DBEAFE")
         PURP_HIT = PatternFill("solid", fgColor="EDE9FE")
@@ -1600,8 +1634,7 @@ def _build_excel(out_dir_str, sidecar):
                 MISS_FILL_P if (rd["in_range_5p"] or rd["in_range_3p"]) else None
             )
             vals = [
-                rd["position"],
-                rd["residue"],
+                rd["position"], rd["residue"],
                 round(rd["theor_mass_5p"], 4) if rd["in_range_5p"] else "",
                 "Yes" if rd["in_range_5p"] else "No",
                 "✓" if h5 else ("✗" if rd["in_range_5p"] else "○"),
@@ -1618,41 +1651,30 @@ def _build_excel(out_dir_str, sidecar):
                 round(rd["obs_rt_3p"], 3) if (h3 and rd["obs_rt_3p"] is not None) else "",
             ]
             for c, val in enumerate(vals, 1):
-                cell = ws5.cell(row=r, column=c, value=val)
+                cell = ws.cell(row=r, column=c, value=val)
                 cell.border = border
                 if fill:
                     cell.fill = fill
 
         last_data_row = DATA_ROW_START + len(prophet["rows"])
+        x_ref = Reference(ws, min_col=1, min_row=DATA_ROW_START + 1, max_row=last_data_row)
 
-        # Chart 1: RT elution profile — Position vs Apex RT for detected fragments
         chart1 = ScatterChart()
-        chart1.title = "RT Elution Profile (Detected Ladder Fragments)"
+        chart1.title = "RT Elution Profile"
         chart1.style = 10
         chart1.xAxis.title = "Sequence Position (nt)"
         chart1.yAxis.title = "Apex RT (min)"
         chart1.width = 26
         chart1.height = 14
+        for col, lbl, sym in [(9, "5′", "circle"), (16, "3′", "diamond")]:
+            s = Series(Reference(ws, min_col=col, min_row=DATA_ROW_START + 1, max_row=last_data_row),
+                       x_ref, title=f"{lbl} ladder")
+            s.marker.symbol = sym
+            s.marker.size = 6
+            s.graphicalProperties.line.noFill = True
+            chart1.series.append(s)
+        ws.add_chart(chart1, f"A{last_data_row + 2}")
 
-        x_ref = Reference(ws5, min_col=1, min_row=DATA_ROW_START + 1, max_row=last_data_row)
-        # 5' RT: col 9
-        y5rt = Reference(ws5, min_col=9, min_row=DATA_ROW_START + 1, max_row=last_data_row)
-        ser5rt = Series(y5rt, x_ref, title="5′ ladder")
-        ser5rt.marker.symbol = "circle"
-        ser5rt.marker.size = 6
-        ser5rt.graphicalProperties.line.noFill = True
-        chart1.series.append(ser5rt)
-        # 3' RT: col 16
-        y3rt = Reference(ws5, min_col=16, min_row=DATA_ROW_START + 1, max_row=last_data_row)
-        ser3rt = Series(y3rt, x_ref, title="3′ ladder")
-        ser3rt.marker.symbol = "diamond"
-        ser3rt.marker.size = 6
-        ser3rt.graphicalProperties.line.noFill = True
-        chart1.series.append(ser3rt)
-
-        ws5.add_chart(chart1, f"A{last_data_row + 2}")
-
-        # Chart 2: Mass accuracy — Position vs Δmass (mDa)
         chart2 = ScatterChart()
         chart2.title = "Mass Accuracy: Observed − Theoretical (±mDa)"
         chart2.style = 10
@@ -1660,31 +1682,36 @@ def _build_excel(out_dir_str, sidecar):
         chart2.yAxis.title = "Δ Mass (mDa)"
         chart2.width = 26
         chart2.height = 14
+        for col, lbl, sym in [(7, "5′", "circle"), (14, "3′", "diamond")]:
+            s = Series(Reference(ws, min_col=col, min_row=DATA_ROW_START + 1, max_row=last_data_row),
+                       x_ref, title=f"{lbl} Δmass")
+            s.marker.symbol = sym
+            s.marker.size = 5
+            s.graphicalProperties.line.noFill = True
+            chart2.series.append(s)
+        ws.add_chart(chart2, f"R{last_data_row + 2}")
 
-        # 5' Δmda: col 7
-        y5d = Reference(ws5, min_col=7, min_row=DATA_ROW_START + 1, max_row=last_data_row)
-        ser5d = Series(y5d, x_ref, title="5′ Δmass")
-        ser5d.marker.symbol = "circle"
-        ser5d.marker.size = 5
-        ser5d.graphicalProperties.line.noFill = True
-        chart2.series.append(ser5d)
-        # 3' Δmda: col 14
-        y3d = Reference(ws5, min_col=14, min_row=DATA_ROW_START + 1, max_row=last_data_row)
-        ser3d = Series(y3d, x_ref, title="3′ Δmass")
-        ser3d.marker.symbol = "diamond"
-        ser3d.marker.size = 5
-        ser3d.graphicalProperties.line.noFill = True
-        chart2.series.append(ser3d)
-
-        ws5.add_chart(chart2, f"R{last_data_row + 2}")
-
-        ws5.freeze_panes = f"A{DATA_ROW_START + 1}"
-        ws5.column_dimensions["A"].width = 8
-        ws5.column_dimensions["B"].width = 12
-        ws5.column_dimensions["E"].width = 10
-        ws5.column_dimensions["L"].width = 10
+        ws.freeze_panes = f"A{DATA_ROW_START + 1}"
+        ws.column_dimensions["A"].width = 8
+        ws.column_dimensions["B"].width = 12
         for col_letter in ["C", "F", "G", "H", "I", "J", "M", "N", "O", "P"]:
-            ws5.column_dimensions[col_letter].width = 16
+            ws.column_dimensions[col_letter].width = 16
+
+    # Sheet 5+: one Prophet Coverage sheet per built-in preset (5S, 5.8S)
+    for preset_label, preset_data in (sidecar.get("preset_prophet_results") or {}).items():
+        _add_prophet_sheet(preset_label, preset_data)
+
+    # Extra sheet for user-provided custom reference (if different from the presets)
+    user_prophet = sidecar.get("prophet_matching")
+    user_ref_seq = sidecar.get("reference_sequence") or ""
+    preset_seqs = {
+        "".join(c for c in s if c in "AUGC")
+        for s in _BUILTIN_RRNA_PRESETS.values()
+    }
+    if user_prophet and user_prophet.get("rows"):
+        user_seq_clean = "".join(c for c in user_ref_seq.upper() if c in "AUGC")
+        if user_seq_clean not in preset_seqs:
+            _add_prophet_sheet("Prophet Coverage (Custom)", user_prophet)
 
     buf = io.BytesIO()
     wb.save(buf)
